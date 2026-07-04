@@ -24,6 +24,7 @@ frontend/    React (Vite) app
 **Backend**
 ```bash
 cd backend
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python seed.py       # creates veggie_app.db with sample data
 python app.py         # runs on http://127.0.0.1:5000

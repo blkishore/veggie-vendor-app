@@ -27,7 +27,30 @@ def home():
         "health": "/api/health"
     })
 
+from flask import Flask
+from flasgger import Swagger
 
+app = Flask(__name__)
+swagger = Swagger(app)
+
+@app.route("/")
+def home():
+    return "API is running"
+
+@app.route("/hello")
+def hello():
+    """
+    A simple endpoint
+    ---
+    responses:
+      200:
+        description: Returns a greeting
+    """
+    return {"message": "Hello World"}
+
+if __name__ == "__main__":
+    app.run(debug=True)
+    
 def parse_date(value: str | None) -> date:
     if not value:
         return date.today()
