@@ -3,12 +3,21 @@ from datetime import date, datetime
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flasgger import Swagger
 
 from models import db, Vendor, Buyer, Product, DailyStock, DemandRequest, Transaction
 from demand_prediction import build_procurement_list
+from product_matcher import ProductMatcher
 
 app = Flask(__name__)
 CORS(app)
+
+app.config["SWAGGER"] = {
+    "title": "Veggie Vendor Assistant API",
+    "uiversion": 3,
+    "specs_route": "/api/docs/",  # Swagger UI lives here
+}
+swagger = Swagger(app)
 
 # Default to SQLite for zero-setup local dev.
 # For MySQL: set DATABASE_URL="mysql+pymysql://user:pass@host/dbname"
@@ -20,37 +29,6 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 
 
-@app.get("/")
-def home():
-    return jsonify({
-        "message": "Veggie Vendor API Running",
-        "health": "/api/health"
-    })
-
-from flask import Flask
-from flasgger import Swagger
-
-app = Flask(__name__)
-swagger = Swagger(app)
-
-@app.route("/")
-def home():
-    return "API is running"
-
-@app.route("/hello")
-def hello():
-    """
-    A simple endpoint
-    ---
-    responses:
-      200:
-        description: Returns a greeting
-    """
-    return {"message": "Hello World"}
-
-if __name__ == "__main__":
-    app.run(debug=True)
-    
 def parse_date(value: str | None) -> date:
     if not value:
         return date.today()
@@ -61,6 +39,24 @@ def parse_date(value: str | None) -> date:
 
 @app.get("/api/products")
 def list_products():
+    """List all products in the catalog.
+    ---
+    tags:
+      - Products
+    responses:
+      200:
+        description: List of products
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: integer}
+              name: {type: string}
+              name_ta: {type: string}
+              name_hi: {type: string}
+              unit: {type: string}
+    """
     products = Product.query.all()
     return jsonify([p.to_dict() for p in products])
 
@@ -69,6 +65,21 @@ def list_products():
 
 @app.get("/api/vendors/<int:vendor_id>")
 def get_vendor(vendor_id):
+    """Get a vendor's profile.
+    ---
+    tags:
+      - Vendors
+    parameters:
+      - name: vendor_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Vendor profile
+      404:
+        description: Vendor not found
+    """
     vendor = Vendor.query.get_or_404(vendor_id)
     return jsonify(vendor.to_dict())
 
@@ -77,9 +88,33 @@ def get_vendor(vendor_id):
 
 @app.post("/api/stock")
 def add_stock_entry():
-    """Vendor logs a purchase and/or sale for a product on a given day.
+    """Log a purchase and/or sale for a product on a given day.
     Called repeatedly through the day as sales happen; upserts the row
-    for that vendor+product+date."""
+    for that vendor+product+date.
+    ---
+    tags:
+      - Stock
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [vendor_id, product_id]
+          properties:
+            vendor_id: {type: integer}
+            product_id: {type: integer}
+            stock_date: {type: string, example: "2026-07-04"}
+            purchased_qty: {type: number}
+            unit_cost: {type: number}
+            sold_qty: {type: number}
+            unit_price: {type: number}
+    responses:
+      201:
+        description: Stock entry created or updated
+      400:
+        description: Missing required fields
+    """
     data = request.get_json()
 
     required = ["vendor_id", "product_id"]
@@ -117,6 +152,24 @@ def add_stock_entry():
 
 @app.get("/api/vendors/<int:vendor_id>/stock")
 def get_stock(vendor_id):
+    """Get a vendor's stock entries for a given date.
+    ---
+    tags:
+      - Stock
+    parameters:
+      - name: vendor_id
+        in: path
+        type: integer
+        required: true
+      - name: date
+        in: query
+        type: string
+        required: false
+        description: Defaults to today. Format YYYY-MM-DD.
+    responses:
+      200:
+        description: List of stock entries
+    """
     stock_date = parse_date(request.args.get("date"))
     entries = DailyStock.query.filter_by(
         vendor_id=vendor_id, stock_date=stock_date
@@ -126,7 +179,24 @@ def get_stock(vendor_id):
 
 @app.get("/api/vendors/<int:vendor_id>/summary")
 def profit_loss_summary(vendor_id):
-    """Daily profit/loss rollup — the core 'how did today go' screen."""
+    """Daily profit/loss rollup — the core 'how did today go' screen.
+    ---
+    tags:
+      - Stock
+    parameters:
+      - name: vendor_id
+        in: path
+        type: integer
+        required: true
+      - name: date
+        in: query
+        type: string
+        required: false
+        description: Defaults to today. Format YYYY-MM-DD.
+    responses:
+      200:
+        description: Profit/loss summary with line items
+    """
     stock_date = parse_date(request.args.get("date"))
     entries = DailyStock.query.filter_by(
         vendor_id=vendor_id, stock_date=stock_date
@@ -150,11 +220,32 @@ def profit_loss_summary(vendor_id):
 
 @app.post("/api/demand")
 def submit_demand_request():
-    """Buyer submits one item for a future pickup date. The frontend
-    calls this once per item in the buyer's list."""
+    """Submit one item of a buyer's demand request for a future pickup date.
+    The frontend calls this once per item in the buyer's list.
+    ---
+    tags:
+      - Demand
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [buyer_id, vendor_id, product_id, quantity, requested_for_date]
+          properties:
+            buyer_id: {type: integer}
+            vendor_id: {type: integer}
+            product_id: {type: integer}
+            quantity: {type: number}
+            requested_for_date: {type: string, example: "2026-07-05"}
+    responses:
+      201:
+        description: Demand request created
+      400:
+        description: Missing required fields
+    """
     data = request.get_json()
-    required = ["buyer_id", "vendor_id", "product_id",
-                "quantity", "requested_for_date"]
+    required = ["buyer_id", "vendor_id", "product_id", "quantity", "requested_for_date"]
     if not all(k in data for k in required):
         return jsonify({"error": f"required fields: {required}"}), 400
 
@@ -175,7 +266,24 @@ def submit_demand_request():
 def get_vendor_demand(vendor_id):
     """Raw list of buyer requests for a given pickup date — what the
     vendor sees as incoming orders before they're turned into a
-    consolidated procurement list."""
+    consolidated procurement list.
+    ---
+    tags:
+      - Demand
+    parameters:
+      - name: vendor_id
+        in: path
+        type: integer
+        required: true
+      - name: date
+        in: query
+        type: string
+        required: false
+        description: Pickup date, defaults to today. Format YYYY-MM-DD.
+    responses:
+      200:
+        description: List of buyer demand requests
+    """
     target_date = parse_date(request.args.get("date"))
     requests_ = DemandRequest.query.filter_by(
         vendor_id=vendor_id, requested_for_date=target_date
@@ -187,7 +295,24 @@ def get_vendor_demand(vendor_id):
 def get_procurement_list(vendor_id):
     """The AI-adjusted consolidated shopping list: pre-orders + predicted
     walk-in demand, combined per product. This is what the vendor takes
-    to the wholesale market."""
+    to the wholesale market.
+    ---
+    tags:
+      - Demand
+    parameters:
+      - name: vendor_id
+        in: path
+        type: integer
+        required: true
+      - name: date
+        in: query
+        type: string
+        required: false
+        description: Target date, defaults to today. Format YYYY-MM-DD.
+    responses:
+      200:
+        description: Consolidated procurement list
+    """
     target_date = parse_date(request.args.get("date"))
     procurement_list = build_procurement_list(vendor_id, target_date)
     return jsonify(
@@ -198,7 +323,28 @@ def get_procurement_list(vendor_id):
 @app.patch("/api/demand/<int:request_id>/confirm")
 def confirm_demand_request(request_id):
     """Mark a buyer's request as confirmed, optionally recording a
-    token UPI payment that locks in the order."""
+    token UPI payment that locks in the order.
+    ---
+    tags:
+      - Demand
+    parameters:
+      - name: request_id
+        in: path
+        type: integer
+        required: true
+      - name: body
+        in: body
+        required: false
+        schema:
+          type: object
+          properties:
+            token_paid: {type: boolean}
+    responses:
+      200:
+        description: Updated demand request
+      404:
+        description: Request not found
+    """
     data = request.get_json(silent=True) or {}
     req_entry = DemandRequest.query.get_or_404(request_id)
     req_entry.status = "confirmed"
@@ -212,6 +358,26 @@ def confirm_demand_request(request_id):
 
 @app.post("/api/transactions")
 def record_transaction():
+    """Record a payment transaction (UPI or cash).
+    ---
+    tags:
+      - Transactions
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [vendor_id, amount]
+          properties:
+            vendor_id: {type: integer}
+            buyer_id: {type: integer}
+            amount: {type: number}
+            mode: {type: string, enum: [upi, cash], default: upi}
+    responses:
+      201:
+        description: Transaction recorded
+    """
     data = request.get_json()
     txn = Transaction(
         vendor_id=data["vendor_id"],
@@ -224,12 +390,58 @@ def record_transaction():
     return jsonify(txn.to_dict()), 201
 
 
+@app.post("/api/match-products")
+def match_products():
+    """Match free-form buyer text against the product catalog using a
+    FAISS vector index (character n-gram TF-IDF vectors under the hood).
+    Handles messy input like 'thakkali 2kg, ulli konjam' without the
+    buyer needing to pick exact names from a dropdown.
+    ---
+    tags:
+      - Demand
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [text]
+          properties:
+            text:
+              type: string
+              example: "thakkali 2kg, konjam ulli, coriander"
+    responses:
+      200:
+        description: Parsed items with matched product and confidence score
+    """
+    data = request.get_json()
+    text = data.get("text", "")
+    if not text.strip():
+        return jsonify({"error": "text is required"}), 400
+
+    products = [p.to_dict() for p in Product.query.all()]
+    if not products:
+        return jsonify({"error": "no products in catalog yet"}), 400
+
+    matcher = ProductMatcher(products)
+    matched = matcher.parse_list(text)
+    return jsonify({"input_text": text, "matches": matched})
+
+
 @app.get("/api/health")
 def health():
+    """Health check.
+    ---
+    tags:
+      - System
+    responses:
+      200:
+        description: Service is up
+    """
     return jsonify({"status": "ok"})
 
 
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, use_reloader=False)

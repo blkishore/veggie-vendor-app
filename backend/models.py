@@ -54,8 +54,13 @@ class Product(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False, unique=True)
-    name_ta = db.Column(db.String(80))  # Tamil label, for voice/UI display
-    name_hi = db.Column(db.String(80))  # Hindi label
+    name_ta = db.Column(db.String(80))  # Tamil script, for display only
+    name_hi = db.Column(db.String(80))  # Hindi script, for display only
+    common_spellings = db.Column(db.String(200))  # comma-separated Latin-script
+    # transliterations buyers actually type, e.g. "thakkali,thakkaali,tomato,tamatar"
+    # This is what fuzzy text matching runs against — Tamil/Hindi script fields
+    # above are for display, not matching, since they share no characters with
+    # the Latin script a buyer types on a phone keyboard.
     unit = db.Column(db.String(10), default="kg")  # kg, bunch, piece
     category = db.Column(db.String(40), default="vegetable")
 
@@ -65,6 +70,7 @@ class Product(db.Model):
             "name": self.name,
             "name_ta": self.name_ta,
             "name_hi": self.name_hi,
+            "common_spellings": self.common_spellings,
             "unit": self.unit,
         }
 

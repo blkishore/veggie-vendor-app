@@ -6,12 +6,12 @@ from app import app
 from models import db, Vendor, Buyer, Product, DailyStock
 
 PRODUCTS = [
-    ("Tomato", "தக்காளி", "टमाटर", "kg"),
-    ("Onion", "வெங்காயம்", "प्याज", "kg"),
-    ("Potato", "உருளைக்கிழங்கு", "आलू", "kg"),
-    ("Coriander", "கொத்தமல்லி", "धनिया", "bunch"),
-    ("Brinjal", "கத்தரிக்காய்", "बैंगन", "kg"),
-    ("Carrot", "கேரட்", "गाजर", "kg"),
+    ("Tomato", "தக்காளி", "टमाटर", "kg", "thakkali,thakkaali,tamatar,tomatoe"),
+    ("Onion", "வெங்காயம்", "प्याज", "kg", "vengayam,ulli,pyaz,pyaaz"),
+    ("Potato", "உருளைக்கிழங்கு", "आलू", "kg", "urulaikizhangu,aloo,alu"),
+    ("Coriander", "கொத்தமல்லி", "धनिया", "bunch", "kothamalli,dhania,coriender"),
+    ("Brinjal", "கத்தரிக்காய்", "बैंगन", "kg", "kathirikai,baingan,eggplant"),
+    ("Carrot", "கேரட்", "गाजर", "kg", "carat,gajar"),
 ]
 
 
@@ -37,8 +37,8 @@ def run():
         db.session.add_all(buyers)
 
         products = [
-            Product(name=n, name_ta=ta, name_hi=hi, unit=unit)
-            for n, ta, hi, unit in PRODUCTS
+            Product(name=n, name_ta=ta, name_hi=hi, unit=unit, common_spellings=spellings)
+            for n, ta, hi, unit, spellings in PRODUCTS
         ]
         db.session.add_all(products)
         db.session.commit()
