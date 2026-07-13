@@ -6,7 +6,8 @@ noise. This starts with a transparent heuristic: weighted recent average,
 adjusted for day-of-week pattern. Swap in scikit-learn / Prophet once
 there are 8-10+ weeks of daily_stock rows per product per vendor.
 """
-import pandas as pd
+from statistics import mean
+
 from models import DailyStock
 
 
@@ -23,20 +24,19 @@ def predict_quantity(vendor_id: int, product_id: int, target_date) -> float:
     if not rows:
         return 0.0
 
-    df = pd.DataFrame(
-        [{"date": r.stock_date, "sold_qty": r.sold_qty} for r in rows]
-    )
-    df["weekday"] = pd.to_datetime(df["date"]).dt.dayofweek
-    target_weekday = pd.to_datetime(target_date).dayofweek
+    target_weekday = target_date.weekday()
+    recent_sales = [float(row.sold_qty) for row in rows[:14]]
+    same_weekday_sales = [
+        float(row.sold_qty)
+        for row in rows
+        if row.stock_date.weekday() == target_weekday
+    ]
 
     # Same-weekday average carries the most signal (Sunday market rush etc.)
-    same_weekday = df[df["weekday"] == target_weekday]["sold_qty"]
-    overall_recent = df["sold_qty"].head(14)  # last 2 weeks, any day
-
-    if len(same_weekday) >= 3:
-        prediction = 0.6 * same_weekday.mean() + 0.4 * overall_recent.mean()
+    if len(same_weekday_sales) >= 3:
+        prediction = 0.6 * mean(same_weekday_sales) + 0.4 * mean(recent_sales)
     else:
-        prediction = overall_recent.mean()
+        prediction = mean(recent_sales)
 
     return round(float(prediction), 2)
 

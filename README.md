@@ -31,6 +31,7 @@ docker-compose.yml         wires Postgres + backend + frontend together
 
 ```bash
 cd backend
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python seed.py
 python app.py            # http://127.0.0.1:5000, Swagger UI at /api/docs/

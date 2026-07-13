@@ -29,10 +29,82 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 
 
+def seed_demo_data():
+    """Populate the local SQLite DB with a ready-to-use demo catalog if empty."""
+    if Product.query.first() is not None:
+        return
+
+    demo_products = [
+        ("Tomato", "தக்காளி", "टमाटर", "kg", "thakkali,thakkaali,tamatar,tomatoe"),
+        ("Onion", "வெங்காயம்", "प्याज", "kg", "vengayam,ulli,pyaz,pyaaz"),
+        ("Potato", "உருளைக்கிழங்கு", "आलू", "kg", "urulaikizhangu,aloo,alu"),
+        ("Coriander", "கொத்தமல்லி", "धनिया",
+         "bunch", "kothamalli,dhania,coriender"),
+        ("Brinjal", "கத்தரிக்காய்", "बैंगन", "kg", "kathirikai,baingan,eggplant"),
+        ("Carrot", "கேரட்", "गाजर", "kg", "carat,gajar"),
+    ]
+
+    vendor = Vendor(
+        name="Murugan Vegetable Stall",
+        phone="9840000001",
+        location_lat=13.0827,
+        location_lng=80.2707,
+        cart_qr_code="CART-MURUGAN-01",
+    )
+    buyer_1 = Buyer(name="Lakshmi", phone="9840000002", preferred_vendor_id=1)
+    buyer_2 = Buyer(name="Ravi", phone="9840000003", preferred_vendor_id=1)
+    buyer_3 = Buyer(name="Fathima", phone="9840000004", preferred_vendor_id=1)
+
+    db.session.add_all([vendor, buyer_1, buyer_2, buyer_3])
+    db.session.flush()
+
+    products = [
+        Product(
+            name=name,
+            name_ta=name_ta,
+            name_hi=name_hi,
+            unit=unit,
+            common_spellings=common_spellings,
+        )
+        for name, name_ta, name_hi, unit, common_spellings in demo_products
+    ]
+    db.session.add_all(products)
+    db.session.commit()
+
+
+with app.app_context():
+    db.create_all()
+    seed_demo_data()
+
+
+@app.get("/")
+def home():
+    return jsonify(
+        {
+            "message": "Veggie Vendor Assistant API",
+            "docs_url": "/api/docs/",
+            "health_url": "/api/health",
+        }
+    )
+
+
+@app.errorhandler(404)
+def handle_not_found(_error):
+    return jsonify(
+        {
+            "error": "route_not_found",
+            "message": "The requested URL was not found on the server.",
+        }
+    ), 404
+
+
 def parse_date(value: str | None) -> date:
     if not value:
         return date.today()
-    return datetime.strptime(value, "%Y-%m-%d").date()
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError("date must be in YYYY-MM-DD format") from exc
 
 
 # ---------- Products ----------
@@ -115,13 +187,18 @@ def add_stock_entry():
       400:
         description: Missing required fields
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body is required"}), 400
 
     required = ["vendor_id", "product_id"]
     if not all(k in data for k in required):
         return jsonify({"error": "vendor_id and product_id are required"}), 400
 
-    stock_date = parse_date(data.get("stock_date"))
+    try:
+        stock_date = parse_date(data.get("stock_date"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     entry = DailyStock.query.filter_by(
         vendor_id=data["vendor_id"],
@@ -245,7 +322,8 @@ def submit_demand_request():
         description: Missing required fields
     """
     data = request.get_json()
-    required = ["buyer_id", "vendor_id", "product_id", "quantity", "requested_for_date"]
+    required = ["buyer_id", "vendor_id", "product_id",
+                "quantity", "requested_for_date"]
     if not all(k in data for k in required):
         return jsonify({"error": f"required fields: {required}"}), 400
 
@@ -346,6 +424,9 @@ def confirm_demand_request(request_id):
         description: Request not found
     """
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body is required"}), 400
+
     req_entry = DemandRequest.query.get_or_404(request_id)
     req_entry.status = "confirmed"
     if data.get("token_paid"):
@@ -378,7 +459,13 @@ def record_transaction():
       201:
         description: Transaction recorded
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body is required"}), 400
+
+    if "vendor_id" not in data or "amount" not in data:
+        return jsonify({"error": "vendor_id and amount are required"}), 400
+
     txn = Transaction(
         vendor_id=data["vendor_id"],
         buyer_id=data.get("buyer_id"),
@@ -414,7 +501,10 @@ def match_products():
       200:
         description: Parsed items with matched product and confidence score
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body is required"}), 400
+
     text = data.get("text", "")
     if not text.strip():
         return jsonify({"error": "text is required"}), 400
@@ -444,4 +534,4 @@ def health():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-    app.run(debug=True, port=5000, use_reloader=False)
+    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)

@@ -5,7 +5,7 @@ Uses SQLite by default (zero setup for local dev) but every column here
 is plain, portable SQL — switching to MySQL later is just a connection
 string change in app.py (see the DATABASE_URL env var).
 """
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
@@ -21,10 +21,12 @@ class Vendor(db.Model):
     location_lng = db.Column(db.Float)
     cart_qr_code = db.Column(db.String(64), unique=True)  # printed on the cart
     trust_score = db.Column(db.Float, default=5.0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(
+        db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     stock_entries = db.relationship("DailyStock", backref="vendor", lazy=True)
-    demand_requests = db.relationship("DemandRequest", backref="vendor", lazy=True)
+    demand_requests = db.relationship(
+        "DemandRequest", backref="vendor", lazy=True)
 
     def to_dict(self):
         return {
@@ -43,7 +45,8 @@ class Buyer(db.Model):
     name = db.Column(db.String(120), nullable=False)
     phone = db.Column(db.String(20), unique=True, nullable=False)
     preferred_vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(
+        db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {"id": self.id, "name": self.name, "phone": self.phone}
@@ -56,7 +59,8 @@ class Product(db.Model):
     name = db.Column(db.String(80), nullable=False, unique=True)
     name_ta = db.Column(db.String(80))  # Tamil script, for display only
     name_hi = db.Column(db.String(80))  # Hindi script, for display only
-    common_spellings = db.Column(db.String(200))  # comma-separated Latin-script
+    # comma-separated Latin-script
+    common_spellings = db.Column(db.String(200))
     # transliterations buyers actually type, e.g. "thakkali,thakkaali,tomato,tamatar"
     # This is what fuzzy text matching runs against — Tamil/Hindi script fields
     # above are for display, not matching, since they share no characters with
@@ -83,8 +87,10 @@ class DailyStock(db.Model):
     __tablename__ = "daily_stock"
 
     id = db.Column(db.Integer, primary_key=True)
-    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+    vendor_id = db.Column(db.Integer, db.ForeignKey(
+        "vendors.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey(
+        "products.id"), nullable=False)
     stock_date = db.Column(db.Date, nullable=False, default=date.today)
 
     purchased_qty = db.Column(db.Float, default=0)
@@ -134,13 +140,18 @@ class DemandRequest(db.Model):
     __tablename__ = "demand_requests"
 
     id = db.Column(db.Integer, primary_key=True)
-    buyer_id = db.Column(db.Integer, db.ForeignKey("buyers.id"), nullable=False)
-    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+    buyer_id = db.Column(db.Integer, db.ForeignKey(
+        "buyers.id"), nullable=False)
+    vendor_id = db.Column(db.Integer, db.ForeignKey(
+        "vendors.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey(
+        "products.id"), nullable=False)
     quantity = db.Column(db.Float, nullable=False)
     requested_for_date = db.Column(db.Date, nullable=False)
-    status = db.Column(db.String(20), default="pending")  # pending, confirmed, fulfilled, cancelled
-    payment_status = db.Column(db.String(20), default="unpaid")  # unpaid, token_paid
+    # pending, confirmed, fulfilled, cancelled
+    status = db.Column(db.String(20), default="pending")
+    payment_status = db.Column(
+        db.String(20), default="unpaid")  # unpaid, token_paid
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     buyer = db.relationship("Buyer")
@@ -163,11 +174,13 @@ class Transaction(db.Model):
     __tablename__ = "transactions"
 
     id = db.Column(db.Integer, primary_key=True)
-    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False)
+    vendor_id = db.Column(db.Integer, db.ForeignKey(
+        "vendors.id"), nullable=False)
     buyer_id = db.Column(db.Integer, db.ForeignKey("buyers.id"))
     amount = db.Column(db.Float, nullable=False)
     mode = db.Column(db.String(20), default="upi")  # upi, cash
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp = db.Column(
+        db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {

@@ -3,8 +3,6 @@ Flask-SQLAlchemy==3.1.1
 Flask-Cors==4.0.1
 python-dotenv==1.0.1
 flasgger==0.9.7.1
-psycopg2-binary==2.9.9
-pandas==2.2.2
-scikit-learn==1.5.1
-faiss-cpu==1.8.0.post1
+# The local MVP uses a lightweight pure-Python matcher, so the heavy ML
+# stack is intentionally omitted here to keep installs portable on Windows.
 pytest==8.3.2
