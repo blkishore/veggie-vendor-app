@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, todayISO } from "../api.js";
 
-export default function VendorDashboard({ vendorId }) {
+export default function VendorDashboard({ vendorId, vendorName, onBack }) {
   const [products, setProducts] = useState([]);
   const [summary, setSummary] = useState(null);
   const [procurement, setProcurement] = useState([]);
@@ -14,6 +14,7 @@ export default function VendorDashboard({ vendorId }) {
     unit_price: "",
   });
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const today = todayISO();
   const tomorrow = todayISO(1);
@@ -30,15 +31,19 @@ export default function VendorDashboard({ vendorId }) {
       setSummary(summaryData);
       setProcurement(procurementData.procurement_list);
       setRawDemand(demandData);
+      setLastUpdated(new Date().toLocaleTimeString());
     } catch (e) {
       setError(e.message);
     }
   }
 
   useEffect(() => {
+    if (!vendorId) return;
     loadAll();
+    const intervalId = setInterval(loadAll, 5000);
+    return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [vendorId]);
 
   async function handleSubmitStock(e) {
     e.preventDefault();
@@ -60,60 +65,81 @@ export default function VendorDashboard({ vendorId }) {
     }
   }
 
+  async function handleConfirmRequest(requestId) {
+    try {
+      await api.confirmDemand(requestId, true);
+      loadAll();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   return (
     <div>
-      {error && <div className="card" style={{ borderColor: "var(--tomato)" }}>{error}</div>}
+      <div className="section-header">
+        <div>
+          <h2>{vendorName || "Vendor Dashboard"}</h2>
+          <p className="helper-text">Vendor mode — live sales, orders, and procurement.</p>
+        </div>
+        <button className="ghost" onClick={onBack}>Back</button>
+      </div>
+
+      {error && <div className="card error-box">{error}</div>}
 
       <div className="card">
-        <h2>Today's profit &amp; loss — {today}</h2>
+        <div className="section-title-row">
+          <h3>Today's summary</h3>
+          <span className="small-note">Updated {lastUpdated || "now"}</span>
+        </div>
         {summary ? (
-          <>
-            <div className="summary-strip">
-              <div className="stat-tag">
-                <span className="label">Cost</span>₹{summary.total_cost}
-              </div>
-              <div className="stat-tag">
-                <span className="label">Revenue</span>₹{summary.total_revenue}
-              </div>
-              <div className="stat-tag profit">
-                <span className="label">Profit</span>₹{summary.total_profit}
-              </div>
+          <div className="summary-strip">
+            <div className="stat-tag">
+              <span className="label">Cost</span>₹{summary.total_cost}
             </div>
-            {summary.items.length === 0 ? (
-              <p className="empty-state">No stock entries logged for today yet.</p>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Purchased</th>
-                    <th>Sold</th>
-                    <th>Unsold</th>
-                    <th>Profit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary.items.map((item) => (
-                    <tr key={item.id}>
-                      <td className="product-name">{item.product}</td>
-                      <td>{item.purchased_qty}</td>
-                      <td>{item.sold_qty}</td>
-                      <td>{item.unsold_qty}</td>
-                      <td>₹{item.profit}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </>
+            <div className="stat-tag">
+              <span className="label">Revenue</span>₹{summary.total_revenue}
+            </div>
+            <div className="stat-tag profit">
+              <span className="label">Profit</span>₹{summary.total_profit}
+            </div>
+          </div>
         ) : (
-          <p className="empty-state">Loading…</p>
+          <p className="empty-state">Loading summary…</p>
         )}
       </div>
 
       <div className="card">
-        <h2>Log a purchase or sale</h2>
-        <p className="helper-text">Leave fields blank if you're only updating one side (e.g. just sold_qty).</p>
+        <div className="section-title-row">
+          <h3>Incoming orders for {tomorrow}</h3>
+          <span className="small-note">Confirm orders once you accept them.</span>
+        </div>
+        {rawDemand.length === 0 ? (
+          <p className="empty-state">No buyer requests yet.</p>
+        ) : (
+          <div className="order-list">
+            {rawDemand.map((req) => (
+              <div key={req.id} className="order-card">
+                <div>
+                  <div className="order-title">{req.product}</div>
+                  <div className="order-meta">{req.buyer_name} • {req.quantity}</div>
+                </div>
+                <div className="order-actions">
+                  <span className={`status-pill ${req.status}`}>{req.status}</span>
+                  {req.status === "pending" && (
+                    <button className="confirm-button" onClick={() => handleConfirmRequest(req.id)}>
+                      Confirm
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>Quick entry</h3>
+        <p className="helper-text">Log a purchase or sale in one tap. Leave purchase fields blank if you only update sold quantity.</p>
         <form onSubmit={handleSubmitStock}>
           <div className="field-row">
             <div className="field">
@@ -131,23 +157,41 @@ export default function VendorDashboard({ vendorId }) {
             </div>
             <div className="field">
               <label>Purchased qty</label>
-              <input type="number" step="0.1" value={form.purchased_qty}
-                onChange={(e) => setForm({ ...form, purchased_qty: e.target.value })} />
+              <input
+                type="number"
+                step="0.1"
+                value={form.purchased_qty}
+                onChange={(e) => setForm({ ...form, purchased_qty: e.target.value })}
+              />
             </div>
             <div className="field">
-              <label>Cost / unit (₹)</label>
-              <input type="number" step="0.1" value={form.unit_cost}
-                onChange={(e) => setForm({ ...form, unit_cost: e.target.value })} />
+              <label>Cost / unit</label>
+              <input
+                type="number"
+                step="0.1"
+                value={form.unit_cost}
+                onChange={(e) => setForm({ ...form, unit_cost: e.target.value })}
+              />
             </div>
+          </div>
+          <div className="field-row">
             <div className="field">
               <label>Sold qty</label>
-              <input type="number" step="0.1" value={form.sold_qty}
-                onChange={(e) => setForm({ ...form, sold_qty: e.target.value })} />
+              <input
+                type="number"
+                step="0.1"
+                value={form.sold_qty}
+                onChange={(e) => setForm({ ...form, sold_qty: e.target.value })}
+              />
             </div>
             <div className="field">
-              <label>Sale price / unit (₹)</label>
-              <input type="number" step="0.1" value={form.unit_price}
-                onChange={(e) => setForm({ ...form, unit_price: e.target.value })} />
+              <label>Sale price</label>
+              <input
+                type="number"
+                step="0.1"
+                value={form.unit_price}
+                onChange={(e) => setForm({ ...form, unit_price: e.target.value })}
+              />
             </div>
           </div>
           <button className="primary" type="submit">Save entry</button>
@@ -155,61 +199,21 @@ export default function VendorDashboard({ vendorId }) {
       </div>
 
       <div className="card">
-        <h2>Tomorrow's procurement list — {tomorrow}</h2>
-        <p className="helper-text">
-          Pre-orders from buyers blended with AI-predicted walk-in demand. This is what to buy at the mandi.
-        </p>
+        <h3>Tomorrow's procurement list</h3>
         {procurement.length === 0 ? (
-          <p className="empty-state">No prediction yet — needs at least one day of sales history.</p>
+          <p className="empty-state">No prediction available yet.</p>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Pre-ordered</th>
-                <th>Predicted walk-in</th>
-                <th>Buy this much</th>
-              </tr>
-            </thead>
-            <tbody>
-              {procurement.map((row) => (
-                <tr key={row.product}>
-                  <td className="product-name">{row.product}</td>
-                  <td>{row.pre_ordered_qty} {row.unit}</td>
-                  <td>{row.predicted_walkin_qty} {row.unit}</td>
-                  <td><span className="qty-tag">{row.recommended_purchase_qty} {row.unit}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="card">
-        <h2>Incoming buyer requests for tomorrow</h2>
-        {rawDemand.length === 0 ? (
-          <p className="empty-state">No buyer requests yet for {tomorrow}.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Buyer</th>
-                <th>Product</th>
-                <th>Quantity</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rawDemand.map((req) => (
-                <tr key={req.id}>
-                  <td className="product-name">{req.buyer_name}</td>
-                  <td>{req.product}</td>
-                  <td>{req.quantity}</td>
-                  <td><span className={`status-pill ${req.status}`}>{req.status}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="order-list">
+            {procurement.map((row) => (
+              <div key={row.product} className="order-card small">
+                <div>
+                  <div className="order-title">{row.product}</div>
+                  <div className="order-meta">Pre-order {row.pre_ordered_qty} • Walk-in {row.predicted_walkin_qty}</div>
+                </div>
+                <div className="qty-tag">Buy {row.recommended_purchase_qty} {row.unit}</div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

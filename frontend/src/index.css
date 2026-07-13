@@ -177,6 +177,133 @@ button.ghost:hover {
   background: #fbeae5;
 }
 
+.app-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.section-header,
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.small-note {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.order-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.order-card.small {
+  padding: 12px;
+}
+
+.order-title,
+.order-summary-title {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.order-meta {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.order-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.confirm-button {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--leaf-900);
+  color: var(--surface);
+  cursor: pointer;
+}
+
+.confirm-button:hover {
+  background: var(--leaf-700);
+}
+
+.error-box {
+  border-color: var(--tomato);
+  background: #fff1f0;
+  color: var(--tomato-dark);
+}
+
+.order-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.order-bubbles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-bubble {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 11px 14px;
+  background: var(--surface);
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.product-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--surface);
+}
+
+.quantity-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+button.ghost.small {
+  padding: 6px 12px;
+  border-radius: 7px;
+}
+
 .summary-strip {
   display: flex;
   gap: 14px;

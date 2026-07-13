@@ -3,7 +3,8 @@ import random
 from datetime import date, timedelta
 
 from app import app
-from models import db, Vendor, Buyer, Product, DailyStock
+from models import db, User, Vendor, Buyer, Product, DailyStock
+from werkzeug.security import generate_password_hash
 
 PRODUCTS = [
     ("Tomato", "தக்காளி", "टमाटर", "kg", "thakkali,thakkaali,tamatar,tomatoe"),
@@ -28,16 +29,57 @@ def run():
             cart_qr_code="CART-MURUGAN-01",
         )
         db.session.add(vendor)
+        db.session.flush()
+
+        user_vendor = User(
+            name="Murugan Vegetable Stall",
+            phone="9840000001",
+            password_hash=generate_password_hash("vendorpass"),
+            role="vendor",
+        )
+        db.session.add(user_vendor)
+        db.session.flush()
+        vendor.user_id = user_vendor.id
 
         buyers = [
-            Buyer(name="Lakshmi", phone="9840000002", preferred_vendor_id=1),
-            Buyer(name="Ravi", phone="9840000003", preferred_vendor_id=1),
-            Buyer(name="Fathima", phone="9840000004", preferred_vendor_id=1),
+            Buyer(name="Lakshmi", phone="9840000002",
+                  preferred_vendor_id=vendor.id),
+            Buyer(name="Ravi", phone="9840000003",
+                  preferred_vendor_id=vendor.id),
+            Buyer(name="Fathima", phone="9840000004",
+                  preferred_vendor_id=vendor.id),
         ]
         db.session.add_all(buyers)
+        db.session.flush()
+
+        user_buyers = [
+            User(
+                name="Lakshmi",
+                phone="9840000002",
+                password_hash=generate_password_hash("buyerpass"),
+                role="customer",
+            ),
+            User(
+                name="Ravi",
+                phone="9840000003",
+                password_hash=generate_password_hash("buyerpass"),
+                role="customer",
+            ),
+            User(
+                name="Fathima",
+                phone="9840000004",
+                password_hash=generate_password_hash("buyerpass"),
+                role="customer",
+            ),
+        ]
+        db.session.add_all(user_buyers)
+        db.session.flush()
+        for buyer, user in zip(buyers, user_buyers):
+            buyer.user_id = user.id
 
         products = [
-            Product(name=n, name_ta=ta, name_hi=hi, unit=unit, common_spellings=spellings)
+            Product(name=n, name_ta=ta, name_hi=hi,
+                    unit=unit, common_spellings=spellings)
             for n, ta, hi, unit, spellings in PRODUCTS
         ]
         db.session.add_all(products)
@@ -52,7 +94,8 @@ def run():
             for days_ago in range(30, 0, -1):
                 d = today - timedelta(days=days_ago)
                 weekday_bump = 1.4 if d.weekday() == 6 else 1.0  # Sunday rush
-                purchased = round(base_qty * weekday_bump * random.uniform(0.85, 1.15), 1)
+                purchased = round(base_qty * weekday_bump *
+                                  random.uniform(0.85, 1.15), 1)
                 sold = round(purchased * random.uniform(0.75, 0.98), 1)
                 cost = round(base_cost * random.uniform(0.9, 1.1), 2)
                 price = round(cost * random.uniform(1.3, 1.6), 2)

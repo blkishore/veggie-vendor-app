@@ -1,8 +1,23 @@
 const BASE = import.meta.env.VITE_API_BASE || "/api";
+let authToken = localStorage.getItem("authToken") || null;
+
+function setAuthToken(token) {
+  authToken = token;
+  if (token) {
+    localStorage.setItem("authToken", token);
+  } else {
+    localStorage.removeItem("authToken");
+  }
+}
 
 async function request(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+  };
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
   if (!res.ok) {
@@ -13,6 +28,13 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  setAuthToken,
+  login: (credentials) => request("/auth/login", { method: "POST", body: JSON.stringify(credentials) }),
+  register: (data) => request("/auth/register", { method: "POST", body: JSON.stringify(data) }),
+  me: () => request("/auth/me"),
+
+  listVendors: () => request("/vendors"),
+  listBuyers: () => request("/buyers"),
   getProducts: () => request("/products"),
   getVendor: (vendorId) => request(`/vendors/${vendorId}`),
 

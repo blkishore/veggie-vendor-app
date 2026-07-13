@@ -1,8 +1,9 @@
 import pytest
 from datetime import date, timedelta
+from werkzeug.security import generate_password_hash
 
 from app import app as flask_app
-from models import db, Vendor, Buyer, Product, DailyStock
+from models import db, User, Vendor, Buyer, Product, DailyStock
 
 
 @pytest.fixture
@@ -11,6 +12,7 @@ def app():
         {
             "TESTING": True,
             "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "JWT_SECRET_KEY": "test-secret",
         }
     )
     with flask_app.app_context():
@@ -32,6 +34,24 @@ def seeded(app):
     buyer = Buyer(name="Test Buyer", phone="9000000001")
     tomato = Product(name="Tomato", unit="kg")
     db.session.add_all([vendor, buyer, tomato])
+    db.session.commit()
+
+    user_vendor = User(
+        name="Test Stall",
+        phone="9000000000",
+        password_hash=generate_password_hash("vendorpass"),
+        role="vendor",
+    )
+    user_buyer = User(
+        name="Test Buyer",
+        phone="9000000001",
+        password_hash=generate_password_hash("buyerpass"),
+        role="customer",
+    )
+    db.session.add_all([user_vendor, user_buyer])
+    db.session.flush()
+    vendor.user_id = user_vendor.id
+    buyer.user_id = user_buyer.id
     db.session.commit()
 
     today = date.today()

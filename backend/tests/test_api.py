@@ -1,6 +1,16 @@
 from datetime import date, timedelta
 
 
+def login(client, phone, password):
+    resp = client.post(
+        "/api/auth/login",
+        json={"phone": phone, "password": password},
+    )
+    assert resp.status_code == 200
+    token = resp.get_json()["token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_health(client):
     resp = client.get("/api/health")
     assert resp.status_code == 200
@@ -15,9 +25,11 @@ def test_list_products_empty(client):
 
 def test_add_stock_entry_and_summary(client, seeded):
     today = date.today().isoformat()
+    headers = login(client, "9000000000", "vendorpass")
 
     resp = client.post(
         "/api/stock",
+        headers=headers,
         json={
             "vendor_id": seeded["vendor_id"],
             "product_id": seeded["product_id"],
@@ -42,16 +54,20 @@ def test_add_stock_entry_and_summary(client, seeded):
 
 
 def test_stock_entry_missing_required_fields(client):
-    resp = client.post("/api/stock", json={"vendor_id": 1})
+    headers = login(client, "9000000000", "vendorpass")
+    resp = client.post("/api/stock", headers=headers, json={"vendor_id": 1})
     assert resp.status_code == 400
     assert "error" in resp.get_json()
 
 
 def test_buyer_demand_submission_appears_in_vendor_view(client, seeded):
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    buyer_headers = login(client, "9000000001", "buyerpass")
+    vendor_headers = login(client, "9000000000", "vendorpass")
 
     resp = client.post(
         "/api/demand",
+        headers=buyer_headers,
         json={
             "buyer_id": seeded["buyer_id"],
             "vendor_id": seeded["vendor_id"],
@@ -64,7 +80,8 @@ def test_buyer_demand_submission_appears_in_vendor_view(client, seeded):
     assert resp.get_json()["status"] == "pending"
 
     vendor_view = client.get(
-        f"/api/vendors/{seeded['vendor_id']}/demand?date={tomorrow}"
+        f"/api/vendors/{seeded['vendor_id']}/demand?date={tomorrow}",
+        headers=vendor_headers,
     ).get_json()
     assert len(vendor_view) == 1
     assert vendor_view[0]["quantity"] == 2.5
@@ -76,8 +93,12 @@ def test_procurement_list_blends_preorders_and_prediction(client, seeded):
     pre-ordered quantity plus the AI-predicted walk-in quantity."""
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
 
+    buyer_headers = login(client, "9000000001", "buyerpass")
+    vendor_headers = login(client, "9000000000", "vendorpass")
+
     client.post(
         "/api/demand",
+        headers=buyer_headers,
         json={
             "buyer_id": seeded["buyer_id"],
             "vendor_id": seeded["vendor_id"],
@@ -88,7 +109,8 @@ def test_procurement_list_blends_preorders_and_prediction(client, seeded):
     )
 
     result = client.get(
-        f"/api/vendors/{seeded['vendor_id']}/procurement-list?date={tomorrow}"
+        f"/api/vendors/{seeded['vendor_id']}/procurement-list?date={tomorrow}",
+        headers=vendor_headers,
     ).get_json()
 
     tomato_row = next(
@@ -104,8 +126,12 @@ def test_procurement_list_blends_preorders_and_prediction(client, seeded):
 
 def test_confirm_demand_with_token_payment(client, seeded):
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    buyer_headers = login(client, "9000000001", "buyerpass")
+    vendor_headers = login(client, "9000000000", "vendorpass")
+
     created = client.post(
         "/api/demand",
+        headers=buyer_headers,
         json={
             "buyer_id": seeded["buyer_id"],
             "vendor_id": seeded["vendor_id"],
@@ -116,12 +142,28 @@ def test_confirm_demand_with_token_payment(client, seeded):
     ).get_json()
 
     resp = client.patch(
-        f"/api/demand/{created['id']}/confirm", json={"token_paid": True}
+        f"/api/demand/{created['id']}/confirm",
+        headers=vendor_headers,
+        json={"token_paid": True},
     )
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "confirmed"
     assert body["payment_status"] == "token_paid"
+
+
+def test_list_vendors_and_buyers(client, seeded):
+    resp = client.get("/api/vendors")
+    assert resp.status_code == 200
+    vendors = resp.get_json()
+    assert isinstance(vendors, list)
+    assert any(v["id"] == seeded["vendor_id"] for v in vendors)
+
+    resp = client.get("/api/buyers")
+    assert resp.status_code == 200
+    buyers = resp.get_json()
+    assert isinstance(buyers, list)
+    assert any(b["id"] == seeded["buyer_id"] for b in buyers)
 
 
 def test_vendor_not_found_returns_404(client):

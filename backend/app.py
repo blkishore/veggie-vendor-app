@@ -1,11 +1,14 @@
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from flasgger import Swagger
+from functools import wraps
+from werkzeug.security import check_password_hash, generate_password_hash
+import jwt
 
-from models import db, Vendor, Buyer, Product, DailyStock, DemandRequest, Transaction
+from models import db, User, Vendor, Buyer, Product, DailyStock, DemandRequest, Transaction
 from demand_prediction import build_procurement_list
 from product_matcher import ProductMatcher
 
@@ -25,6 +28,11 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
     "DATABASE_URL", "sqlite:///veggie_app.db"
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["JWT_SECRET_KEY"] = os.environ.get(
+    "JWT_SECRET_KEY", "please-change-this-secret")
+
+if "JWT_SECRET_KEY" not in app.config or not app.config["JWT_SECRET_KEY"]:
+    raise RuntimeError("JWT_SECRET_KEY must be configured")
 
 db.init_app(app)
 
@@ -51,12 +59,39 @@ def seed_demo_data():
         location_lng=80.2707,
         cart_qr_code="CART-MURUGAN-01",
     )
-    buyer_1 = Buyer(name="Lakshmi", phone="9840000002", preferred_vendor_id=1)
-    buyer_2 = Buyer(name="Ravi", phone="9840000003", preferred_vendor_id=1)
-    buyer_3 = Buyer(name="Fathima", phone="9840000004", preferred_vendor_id=1)
-
-    db.session.add_all([vendor, buyer_1, buyer_2, buyer_3])
+    db.session.add(vendor)
     db.session.flush()
+
+    user_vendor = User(
+        name="Murugan Vegetable Stall",
+        phone="9840000001",
+        password_hash=generate_password_hash("vendorpass"),
+        role="vendor",
+    )
+    db.session.add(user_vendor)
+    db.session.flush()
+    vendor.user_id = user_vendor.id
+
+    buyer_1 = Buyer(name="Lakshmi", phone="9840000002",
+                    preferred_vendor_id=vendor.id)
+    buyer_2 = Buyer(name="Ravi", phone="9840000003",
+                    preferred_vendor_id=vendor.id)
+    buyer_3 = Buyer(name="Fathima", phone="9840000004",
+                    preferred_vendor_id=vendor.id)
+    db.session.add_all([buyer_1, buyer_2, buyer_3])
+    db.session.flush()
+
+    user_buyer_1 = User(name="Lakshmi", phone="9840000002",
+                        password_hash=generate_password_hash("buyerpass"), role="customer")
+    user_buyer_2 = User(name="Ravi", phone="9840000003",
+                        password_hash=generate_password_hash("buyerpass"), role="customer")
+    user_buyer_3 = User(name="Fathima", phone="9840000004",
+                        password_hash=generate_password_hash("buyerpass"), role="customer")
+    db.session.add_all([user_buyer_1, user_buyer_2, user_buyer_3])
+    db.session.flush()
+    buyer_1.user_id = user_buyer_1.id
+    buyer_2.user_id = user_buyer_2.id
+    buyer_3.user_id = user_buyer_3.id
 
     products = [
         Product(
@@ -105,6 +140,154 @@ def parse_date(value: str | None) -> date:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError as exc:
         raise ValueError("date must be in YYYY-MM-DD format") from exc
+
+
+def get_bearer_token() -> str | None:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header.split(" ", 1)[1].strip()
+    return None
+
+
+def decode_jwt(token: str) -> dict | None:
+    try:
+        return jwt.decode(token, app.config["JWT_SECRET_KEY"], algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        return None
+
+
+def require_auth(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        token = get_bearer_token()
+        if not token:
+            return jsonify({"error": "authorization_required"}), 401
+
+        payload = decode_jwt(token)
+        if not payload or "sub" not in payload:
+            return jsonify({"error": "invalid_token"}), 401
+
+        user = User.query.get(payload["sub"])
+        if not user:
+            return jsonify({"error": "user_not_found"}), 401
+
+        g.current_user = user
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def require_role(role):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            auth_response = require_auth(lambda *a, **k: None)(*args, **kwargs)
+            if isinstance(auth_response, tuple):
+                return auth_response
+
+            user = g.current_user
+            if user.role != role:
+                return jsonify({"error": "forbidden", "message": f"{role} role required"}), 403
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def make_token(user: User) -> str:
+    payload = {
+        "sub": user.id,
+        "role": user.role,
+        "exp": datetime.utcnow() + timedelta(days=7),
+    }
+    return jwt.encode(payload, app.config["JWT_SECRET_KEY"], algorithm="HS256")
+
+
+@app.post("/api/auth/register")
+def register_user():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body is required"}), 400
+
+    required = ["name", "phone", "password", "role"]
+    if not all(field in data for field in required):
+        return jsonify({"error": "name, phone, password and role are required"}), 400
+
+    if data["role"] not in {"vendor", "customer"}:
+        return jsonify({"error": "role must be vendor or customer"}), 400
+
+    if User.query.filter_by(phone=data["phone"]).first():
+        return jsonify({"error": "phone already registered"}), 400
+
+    password_hash = generate_password_hash(data["password"])
+    user = User(name=data["name"], phone=data["phone"],
+                password_hash=password_hash, role=data["role"])
+    db.session.add(user)
+    db.session.flush()
+
+    profile = None
+    if data["role"] == "vendor":
+        profile = Vendor(
+            user_id=user.id,
+            name=data["name"],
+            phone=data["phone"],
+            location_lat=data.get("location_lat"),
+            location_lng=data.get("location_lng"),
+            cart_qr_code=data.get("cart_qr_code"),
+        )
+        db.session.add(profile)
+    else:
+        profile = Buyer(
+            user_id=user.id,
+            name=data["name"],
+            phone=data["phone"],
+            preferred_vendor_id=data.get("preferred_vendor_id"),
+        )
+        db.session.add(profile)
+
+    db.session.commit()
+
+    token = make_token(user)
+    return jsonify({"token": token, "user": user.to_dict(), "profile": profile.to_dict()}), 201
+
+
+@app.post("/api/auth/login")
+def login_user():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body is required"}), 400
+
+    phone = data.get("phone")
+    password = data.get("password")
+    if not phone or not password:
+        return jsonify({"error": "phone and password are required"}), 400
+
+    user = User.query.filter_by(phone=phone).first()
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({"error": "invalid_credentials"}), 401
+
+    token = make_token(user)
+    profile = None
+    if user.role == "vendor" and user.vendor_profile:
+        profile = user.vendor_profile.to_dict()
+    elif user.role == "customer" and user.buyer_profile:
+        profile = user.buyer_profile.to_dict()
+
+    return jsonify({"token": token, "user": user.to_dict(), "profile": profile})
+
+
+@app.get("/api/auth/me")
+@require_auth
+def auth_me():
+    user = g.current_user
+    profile = None
+    if user.role == "vendor" and user.vendor_profile:
+        profile = user.vendor_profile.to_dict()
+    elif user.role == "customer" and user.buyer_profile:
+        profile = user.buyer_profile.to_dict()
+    return jsonify({"user": user.to_dict(), "profile": profile})
 
 
 # ---------- Products ----------
@@ -156,9 +339,25 @@ def get_vendor(vendor_id):
     return jsonify(vendor.to_dict())
 
 
+@app.get("/api/vendors")
+def list_vendors():
+    """List all vendors."""
+    vendors = Vendor.query.all()
+    return jsonify([vendor.to_dict() for vendor in vendors])
+
+
+@app.get("/api/buyers")
+def list_buyers():
+    """List all buyers."""
+    buyers = Buyer.query.all()
+    return jsonify([buyer.to_dict() for buyer in buyers])
+
+
 # ---------- Daily stock (vendor purchase/sale entry) ----------
 
 @app.post("/api/stock")
+@require_auth
+@require_role("vendor")
 def add_stock_entry():
     """Log a purchase and/or sale for a product on a given day.
     Called repeatedly through the day as sales happen; upserts the row
@@ -213,6 +412,9 @@ def add_stock_entry():
             stock_date=stock_date,
         )
         db.session.add(entry)
+
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != data["vendor_id"]:
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
 
     if "purchased_qty" in data:
         entry.purchased_qty = data["purchased_qty"]
@@ -296,6 +498,8 @@ def profit_loss_summary(vendor_id):
 # ---------- Buyer demand requests ("Tomorrow's list") ----------
 
 @app.post("/api/demand")
+@require_auth
+@require_role("customer")
 def submit_demand_request():
     """Submit one item of a buyer's demand request for a future pickup date.
     The frontend calls this once per item in the buyer's list.
@@ -341,6 +545,8 @@ def submit_demand_request():
 
 
 @app.get("/api/vendors/<int:vendor_id>/demand")
+@require_auth
+@require_role("vendor")
 def get_vendor_demand(vendor_id):
     """Raw list of buyer requests for a given pickup date — what the
     vendor sees as incoming orders before they're turned into a
@@ -363,6 +569,9 @@ def get_vendor_demand(vendor_id):
         description: List of buyer demand requests
     """
     target_date = parse_date(request.args.get("date"))
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != vendor_id:
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
+
     requests_ = DemandRequest.query.filter_by(
         vendor_id=vendor_id, requested_for_date=target_date
     ).all()
@@ -370,6 +579,8 @@ def get_vendor_demand(vendor_id):
 
 
 @app.get("/api/vendors/<int:vendor_id>/procurement-list")
+@require_auth
+@require_role("vendor")
 def get_procurement_list(vendor_id):
     """The AI-adjusted consolidated shopping list: pre-orders + predicted
     walk-in demand, combined per product. This is what the vendor takes
@@ -392,6 +603,9 @@ def get_procurement_list(vendor_id):
         description: Consolidated procurement list
     """
     target_date = parse_date(request.args.get("date"))
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != vendor_id:
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
+
     procurement_list = build_procurement_list(vendor_id, target_date)
     return jsonify(
         {"date": target_date.isoformat(), "procurement_list": procurement_list}
@@ -399,6 +613,8 @@ def get_procurement_list(vendor_id):
 
 
 @app.patch("/api/demand/<int:request_id>/confirm")
+@require_auth
+@require_role("vendor")
 def confirm_demand_request(request_id):
     """Mark a buyer's request as confirmed, optionally recording a
     token UPI payment that locks in the order.
@@ -428,6 +644,9 @@ def confirm_demand_request(request_id):
         return jsonify({"error": "JSON body is required"}), 400
 
     req_entry = DemandRequest.query.get_or_404(request_id)
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != req_entry.vendor_id:
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own orders"}), 403
+
     req_entry.status = "confirmed"
     if data.get("token_paid"):
         req_entry.payment_status = "token_paid"

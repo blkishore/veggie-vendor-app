@@ -11,10 +11,34 @@ from flask_sqlalchemy import SQLAlchemy
 db = SQLAlchemy()
 
 
+class User(db.Model):
+    __tablename__ = "users"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    phone = db.Column(db.String(20), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(20), nullable=False)  # vendor or customer
+    created_at = db.Column(
+        db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    buyer_profile = db.relationship("Buyer", backref="user", uselist=False)
+    vendor_profile = db.relationship("Vendor", backref="user", uselist=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "phone": self.phone,
+            "role": self.role,
+        }
+
+
 class Vendor(db.Model):
     __tablename__ = "vendors"
 
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True)
     name = db.Column(db.String(120), nullable=False)
     phone = db.Column(db.String(20), unique=True, nullable=False)
     location_lat = db.Column(db.Float)
@@ -31,6 +55,7 @@ class Vendor(db.Model):
     def to_dict(self):
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "name": self.name,
             "phone": self.phone,
             "cart_qr_code": self.cart_qr_code,
@@ -42,6 +67,7 @@ class Buyer(db.Model):
     __tablename__ = "buyers"
 
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True)
     name = db.Column(db.String(120), nullable=False)
     phone = db.Column(db.String(20), unique=True, nullable=False)
     preferred_vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"))
@@ -49,7 +75,13 @@ class Buyer(db.Model):
         db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "phone": self.phone}
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "name": self.name,
+            "phone": self.phone,
+            "preferred_vendor_id": self.preferred_vendor_id,
+        }
 
 
 class Product(db.Model):

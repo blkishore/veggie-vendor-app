@@ -1,40 +1,119 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import RoleSelector from "./pages/RoleSelector.jsx";
 import VendorDashboard from "./pages/VendorDashboard.jsx";
 import BuyerList from "./pages/BuyerList.jsx";
-
-// Hardcoded IDs matching seed.py — a real build would come from login/QR scan.
-const VENDOR_ID = 1;
+import AuthPage from "./pages/AuthPage.jsx";
+import ProfilePage from "./pages/ProfilePage.jsx";
+import { api } from "./api.js";
 
 export default function App() {
-  const [tab, setTab] = useState("vendor");
+  const [auth, setAuth] = useState(null);
+  const [mode, setMode] = useState(null);
+  const [vendors, setVendors] = useState([]);
+  const [buyers, setBuyers] = useState([]);
+  const [selectedVendor, setSelectedVendor] = useState(null);
+  const [selectedBuyer, setSelectedBuyer] = useState(null);
+
+  useEffect(() => {
+    async function loadPeople() {
+      try {
+        const [vendorList, buyerList] = await Promise.all([
+          api.listVendors(),
+          api.listBuyers(),
+        ]);
+        setVendors(vendorList);
+        setBuyers(buyerList);
+      } catch (error) {
+        console.error("Failed to load vendor/buyer lists", error);
+      }
+    }
+    loadPeople();
+  }, []);
+
+  useEffect(() => {
+    async function restoreSession() {
+      try {
+        const payload = await api.me();
+        setAuth(payload);
+      } catch (_err) {
+        api.setAuthToken(null);
+        setAuth(null);
+      }
+    }
+    restoreSession();
+  }, []);
+
+  const buyerPreferredVendor = selectedBuyer
+    ? vendors.find((v) => v.id === selectedBuyer.preferred_vendor_id)
+    : null;
+
+  const activeVendor =
+    mode === "vendor"
+      ? selectedVendor
+      : buyerPreferredVendor || selectedVendor;
+
+  const activeVendorId = activeVendor?.id;
+  const activeVendorName = activeVendor?.name;
+
+  function handleLogout() {
+    api.setAuthToken(null);
+    setAuth(null);
+    setMode(null);
+    setSelectedVendor(null);
+    setSelectedBuyer(null);
+  }
 
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>Murugan Vegetable Stall</h1>
-        <span className="stall-tag">CART-MURUGAN-01</span>
+        <div>
+          <h1>Veggie Vendor App</h1>
+          <p className="app-subtitle">Simple vendor + customer ordering for local carts</p>
+        </div>
+        {auth && (
+          <button className="ghost" onClick={handleLogout}>
+            Log out
+          </button>
+        )}
       </header>
 
-      <nav className="tabs">
-        <button
-          className={`tab-button ${tab === "vendor" ? "active" : ""}`}
-          onClick={() => setTab("vendor")}
-        >
-          Vendor dashboard
-        </button>
-        <button
-          className={`tab-button ${tab === "buyer" ? "active" : ""}`}
-          onClick={() => setTab("buyer")}
-        >
-          Send tomorrow's list
-        </button>
-      </nav>
-
-      {tab === "vendor" ? (
-        <VendorDashboard vendorId={VENDOR_ID} />
-      ) : (
-        <BuyerList vendorId={VENDOR_ID} />
-      )}
+      {!auth ? (
+        <AuthPage onLogin={(payload) => setAuth(payload)} />
+      ) : auth?.user ? (
+        <>
+          <ProfilePage user={auth.user} profile={auth.profile} onLogout={handleLogout} />
+          {mode === null ? (
+            <RoleSelector
+              vendors={vendors}
+              buyers={buyers}
+              onChooseVendor={(vendor) => {
+                setSelectedVendor(vendor);
+                setSelectedBuyer(null);
+                setMode("vendor");
+              }}
+              onChooseBuyer={(buyer) => {
+                setSelectedBuyer(buyer);
+                setSelectedVendor(vendors.find((v) => v.id === buyer.preferred_vendor_id) || null);
+                setMode("buyer");
+              }}
+            />
+          ) : mode === "vendor" ? (
+            <VendorDashboard
+              vendorId={activeVendorId}
+              vendorName={activeVendorName || selectedVendor?.name || "Vendor"}
+              onBack={() => setMode(null)}
+            />
+          ) : (
+            <BuyerList
+              vendorId={activeVendorId}
+              buyerId={selectedBuyer?.id}
+              buyerName={selectedBuyer?.name}
+              vendorName={activeVendorName || selectedVendor?.name}
+              onBack={() => setMode(null)}
+            />
+          )}
+        </>
+      ) : null}
     </div>
   );
 }
