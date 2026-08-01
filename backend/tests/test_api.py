@@ -53,7 +53,7 @@ def test_add_stock_entry_and_summary(client, seeded):
     assert len(summary["items"]) == 1
 
 
-def test_stock_entry_missing_required_fields(client):
+def test_stock_entry_missing_required_fields(client, seeded):
     headers = login(client, "9000000000", "vendorpass")
     resp = client.post("/api/stock", headers=headers, json={"vendor_id": 1})
     assert resp.status_code == 400

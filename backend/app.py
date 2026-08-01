@@ -107,10 +107,9 @@ def seed_demo_data():
     db.session.commit()
 
 
-with app.app_context():
-    db.create_all()
-    seed_demo_data()
-
+# Do not auto-create or seed the database at import time.
+# This allows tests and production to configure the app before the
+# database engine is initialized.
 
 @app.get("/")
 def home():
@@ -753,4 +752,5 @@ def health():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+        seed_demo_data()
     app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
