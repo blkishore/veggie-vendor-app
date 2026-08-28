@@ -5,12 +5,31 @@ export default function RoleSelector({ vendors, buyers, onChooseVendor, onChoose
         <h2>Choose how you want to use the app</h2>
         <p className="helper-text">Select vendor mode to manage orders and sales. Select customer mode to send a list to your vendor.</p>
         <div className="product-grid">
-          <button className="primary" style={{ width: "100%" }} onClick={() => onChooseVendor(vendors[0] || { id: 1, name: "Vendor" })}>
-            Vendor mode
-          </button>
-          <button className="primary" style={{ width: "100%" }} onClick={() => onChooseBuyer(buyers[0] || { id: 1, name: "Customer" })}>
-            Customer mode
-          </button>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <button
+              className="primary"
+              onClick={() => {
+                // navigate to vendor app route
+                const target = `${window.location.origin}/vendor`;
+                window.location.href = target;
+              }}
+            >
+              Vendor mode
+            </button>
+            <button
+              className="primary"
+              onClick={() => {
+                // navigate to vendor-customer customer route (vcustomer)
+                const target = `${window.location.origin}/vcustomer`;
+                window.location.href = target;
+              }}
+            >
+              Customer mode
+            </button>
+          </div>
+          <div style={{ padding: 8 }}>
+            <img src="/hero.svg" alt="hero" style={{ width: '100%', borderRadius: 10 }} />
+          </div>
         </div>
       </div>
 

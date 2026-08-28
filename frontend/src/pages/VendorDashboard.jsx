@@ -1,7 +1,17 @@
 import { useEffect, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import { api, todayISO } from "../api.js";
+import DashboardLayout from "../components/DashboardLayout.jsx";
+import ImageGallery from "../components/ImageGallery.jsx";
+import VendorOverview from "./VendorOverview.jsx";
+import VendorOrders from "./VendorOrders.jsx";
+import VendorProducts from "./VendorProducts.jsx";
+import VendorGalleryPage from "./VendorGalleryPage.jsx";
+import VendorSettings from "./VendorSettings.jsx";
 
-export default function VendorDashboard({ vendorId, vendorName, onBack }) {
+export default function VendorDashboard({ vendorId, vendorName, onBack, user, profile }) {
+  const outlet = useOutletContext() || {};
+  const auth = outlet.auth || { user, profile };
   const [products, setProducts] = useState([]);
   const [summary, setSummary] = useState(null);
   const [procurement, setProcurement] = useState([]);
@@ -15,6 +25,7 @@ export default function VendorDashboard({ vendorId, vendorName, onBack }) {
   });
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [activeTab, setActiveTab] = useState("overview");
 
   const today = todayISO();
   const tomorrow = todayISO(1);
@@ -41,9 +52,17 @@ export default function VendorDashboard({ vendorId, vendorName, onBack }) {
     if (!vendorId) return;
     loadAll();
     const intervalId = setInterval(loadAll, 5000);
+    const handler = (e) => setActiveTab(e.detail || "overview");
+    window.addEventListener("dashboard:navigate", handler);
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendorId]);
+
+  useEffect(() => {
+    const handler = (e) => setActiveTab(e.detail || "overview");
+    window.addEventListener("dashboard:navigate", handler);
+    return () => window.removeEventListener("dashboard:navigate", handler);
+  }, []);
 
   async function handleSubmitStock(e) {
     e.preventDefault();
@@ -75,22 +94,22 @@ export default function VendorDashboard({ vendorId, vendorName, onBack }) {
   }
 
   return (
-    <div>
+    <DashboardLayout title={vendorName || "Vendor Dashboard"} user={auth?.user} profile={auth?.profile}>
       <div className="section-header">
         <div>
-          <h2>{vendorName || "Vendor Dashboard"}</h2>
-          <p className="helper-text">Vendor mode — live sales, orders, and procurement.</p>
+          <h3 className="muted-title">Vendor mode — live sales, orders, and procurement.</h3>
         </div>
         <button className="ghost" onClick={onBack}>Back</button>
       </div>
 
       {error && <div className="card error-box">{error}</div>}
 
-      <div className="card">
-        <div className="section-title-row">
-          <h3>Today's summary</h3>
-          <span className="small-note">Updated {lastUpdated || "now"}</span>
-        </div>
+      <div className="grid-2">
+        <div className="card">
+          <div className="section-title-row">
+            <h3>Today's summary</h3>
+            <span className="small-note">Updated {lastUpdated || "now"}</span>
+          </div>
         {summary ? (
           <div className="summary-strip">
             <div className="stat-tag">
@@ -106,35 +125,21 @@ export default function VendorDashboard({ vendorId, vendorName, onBack }) {
         ) : (
           <p className="empty-state">Loading summary…</p>
         )}
-      </div>
-
-      <div className="card">
-        <div className="section-title-row">
-          <h3>Incoming orders for {tomorrow}</h3>
-          <span className="small-note">Confirm orders once you accept them.</span>
         </div>
-        {rawDemand.length === 0 ? (
-          <p className="empty-state">No buyer requests yet.</p>
-        ) : (
-          <div className="order-list">
-            {rawDemand.map((req) => (
-              <div key={req.id} className="order-card">
-                <div>
-                  <div className="order-title">{req.product}</div>
-                  <div className="order-meta">{req.buyer_name} • {req.quantity}</div>
-                </div>
-                <div className="order-actions">
-                  <span className={`status-pill ${req.status}`}>{req.status}</span>
-                  {req.status === "pending" && (
-                    <button className="confirm-button" onClick={() => handleConfirmRequest(req.id)}>
-                      Confirm
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+
+        <div className="card">
+          <h3>Gallery</h3>
+          <p className="small-note">Add images to showcase produce or art.</p>
+          <ImageGallery vendorId={vendorId} />
+        </div>
+      </div>
+      {/* Tab content area */}
+      <div className="card">
+        {activeTab === "overview" && <VendorOverview summary={summary} lastUpdated={lastUpdated} />}
+        {activeTab === "orders" && <VendorOrders vendorId={vendorId} />}
+        {activeTab === "products" && <VendorProducts vendorId={vendorId} />}
+        {activeTab === "gallery" && <VendorGalleryPage vendorId={vendorId} />}
+        {activeTab === "settings" && <VendorSettings vendorId={vendorId} profile={profile} />}
       </div>
 
       <div className="card">
@@ -216,6 +221,6 @@ export default function VendorDashboard({ vendorId, vendorName, onBack }) {
           </div>
         )}
       </div>
-    </div>
+    </DashboardLayout>
   );
 }

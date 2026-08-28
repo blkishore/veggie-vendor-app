@@ -44,6 +44,14 @@ class Vendor(db.Model):
     location_lat = db.Column(db.Float)
     location_lng = db.Column(db.Float)
     cart_qr_code = db.Column(db.String(64), unique=True)  # printed on the cart
+    # Basic availability and mobile vendor support
+    available = db.Column(db.Boolean, default=True)
+    is_mobile = db.Column(db.Boolean, default=False)
+    # Simple opening hours string like "09:00-21:00" (daily) for MVP
+    opening_hours = db.Column(db.String(64), default="09:00-21:00")
+    category = db.Column(db.String(40), default="vegetable")
+    rating = db.Column(db.Float, default=5.0)
+    profile_photo = db.Column(db.String(200))
     trust_score = db.Column(db.Float, default=5.0)
     created_at = db.Column(
         db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -59,6 +67,14 @@ class Vendor(db.Model):
             "name": self.name,
             "phone": self.phone,
             "cart_qr_code": self.cart_qr_code,
+            "location_lat": self.location_lat,
+            "location_lng": self.location_lng,
+            "available": bool(self.available),
+            "is_mobile": bool(self.is_mobile),
+            "opening_hours": self.opening_hours,
+            "category": self.category,
+            "rating": float(self.rating) if self.rating is not None else None,
+            "profile_photo": self.profile_photo,
             "trust_score": self.trust_score,
         }
 
@@ -108,6 +124,32 @@ class Product(db.Model):
             "name_hi": self.name_hi,
             "common_spellings": self.common_spellings,
             "unit": self.unit,
+        }
+
+
+class VendorProduct(db.Model):
+    __tablename__ = "vendor_products"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey(
+        "vendors.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey(
+        "products.id"), nullable=False)
+    price = db.Column(db.Float, nullable=False, default=0.0)
+    available = db.Column(db.Boolean, default=True)
+    stock = db.Column(db.Float, default=0)
+
+    product = db.relationship("Product")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "vendor_id": self.vendor_id,
+            "product_id": self.product_id,
+            "product_name": self.product.name if self.product else None,
+            "price": self.price,
+            "available": bool(self.available),
+            "stock": self.stock,
         }
 
 
@@ -222,4 +264,56 @@ class Transaction(db.Model):
             "amount": self.amount,
             "mode": self.mode,
             "timestamp": self.timestamp.isoformat(),
+        }
+
+
+class Order(db.Model):
+    __tablename__ = "orders"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey(
+        "vendors.id"), nullable=False)
+    buyer_id = db.Column(db.Integer, db.ForeignKey("buyers.id"))
+    total_amount = db.Column(db.Float, default=0)
+    mode = db.Column(db.String(20), default="pickup")  # pickup, delivery
+    # pending, accepted, fulfilled, cancelled
+    status = db.Column(db.String(20), default="pending")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    items = db.relationship("OrderItem", backref="order", lazy=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "vendor_id": self.vendor_id,
+            "buyer_id": self.buyer_id,
+            "total_amount": self.total_amount,
+            "mode": self.mode,
+            "status": self.status,
+            "created_at": self.created_at.isoformat(),
+            "items": [it.to_dict() for it in self.items],
+        }
+
+
+class OrderItem(db.Model):
+    __tablename__ = "order_items"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey(
+        "orders.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey(
+        "products.id"), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    unit_price = db.Column(db.Float, nullable=False)
+
+    product = db.relationship("Product")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "order_id": self.order_id,
+            "product_id": self.product_id,
+            "product_name": self.product.name if self.product else None,
+            "quantity": self.quantity,
+            "unit_price": self.unit_price,
         }

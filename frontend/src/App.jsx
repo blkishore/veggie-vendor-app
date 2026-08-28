@@ -101,6 +101,8 @@ export default function App() {
             <VendorDashboard
               vendorId={activeVendorId}
               vendorName={activeVendorName || selectedVendor?.name || "Vendor"}
+              user={auth.user}
+              profile={auth.profile}
               onBack={() => setMode(null)}
             />
           ) : (

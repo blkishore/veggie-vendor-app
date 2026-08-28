@@ -13,9 +13,15 @@ export default function AuthPage({ onLogin }) {
     try {
       const body = {
         name: form.name,
+        owner_name: form.owner_name,
+        store_name: form.store_name,
         phone: form.phone,
         password: form.password,
         role: form.role,
+        preferred_vendor_id: form.preferred_vendor_id || null,
+        location_lat: form.location_lat || null,
+        location_lng: form.location_lng || null,
+        cart_qr_code: form.cart_qr_code || null,
       };
 
       const payload = mode === "login"
@@ -53,7 +59,7 @@ export default function AuthPage({ onLogin }) {
           {mode === "register" && (
             <div className="field-row">
               <div className="field">
-                <label>Name</label>
+                <label>Full name</label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -84,21 +90,42 @@ export default function AuthPage({ onLogin }) {
               />
             </div>
           </div>
-
           {mode === "register" && (
-            <div className="field-row">
-              <label style={{ width: "100%" }}>
-                Role
-                <select
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  style={{ width: "100%", marginTop: "6px" }}
-                >
-                  <option value="vendor">Vendor</option>
-                  <option value="customer">Customer</option>
-                </select>
-              </label>
-            </div>
+            <>
+              <div className="field-row">
+                <label style={{ width: "100%" }}>
+                  Role
+                  <select
+                    value={form.role}
+                    onChange={(e) => setForm({ ...form, role: e.target.value })}
+                    style={{ width: "100%", marginTop: "6px" }}
+                  >
+                    <option value="vendor">Vendor</option>
+                    <option value="customer">Customer</option>
+                  </select>
+                </label>
+              </div>
+
+              {form.role === "vendor" ? (
+                <div className="field-row">
+                  <div className="field">
+                    <label>Owner name</label>
+                    <input value={form.owner_name || ""} onChange={(e) => setForm({ ...form, owner_name: e.target.value })} placeholder="Owner's name" />
+                  </div>
+                  <div className="field">
+                    <label>Store name</label>
+                    <input value={form.store_name || ""} onChange={(e) => setForm({ ...form, store_name: e.target.value })} placeholder="Store / stall name" />
+                  </div>
+                </div>
+              ) : (
+                <div className="field-row">
+                  <div className="field">
+                    <label>Preferred vendor (optional)</label>
+                    <input value={form.preferred_vendor_id || ""} onChange={(e) => setForm({ ...form, preferred_vendor_id: e.target.value })} placeholder="Vendor ID or leave empty" />
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           <button className="primary" type="submit">

@@ -4,7 +4,7 @@ export default function ProfilePage({ user, profile, onLogout }) {
       <div className="section-header">
         <div>
           <h2>Welcome back, {user.name}</h2>
-          <p className="helper-text">Role: {user.role}</p>
+          <p className="helper-text">Role: {user.role} {profile?.name ? `• ${profile.name}` : ''}</p>
         </div>
         <button className="ghost" onClick={onLogout}>Log out</button>
       </div>

@@ -221,7 +221,11 @@ def register_user():
         return jsonify({"error": "phone already registered"}), 400
 
     password_hash = generate_password_hash(data["password"])
-    user = User(name=data["name"], phone=data["phone"],
+    # Support separate owner/store names: owner_name used for User.name,
+    # store_name used for Vendor.name when role==vendor. Fall back to data['name'].
+    owner_name = data.get("owner_name", data.get("name"))
+    store_name = data.get("store_name", data.get("name"))
+    user = User(name=owner_name, phone=data["phone"],
                 password_hash=password_hash, role=data["role"])
     db.session.add(user)
     db.session.flush()
@@ -230,7 +234,7 @@ def register_user():
     if data["role"] == "vendor":
         profile = Vendor(
             user_id=user.id,
-            name=data["name"],
+            name=store_name,
             phone=data["phone"],
             location_lat=data.get("location_lat"),
             location_lng=data.get("location_lng"),
@@ -240,7 +244,7 @@ def register_user():
     else:
         profile = Buyer(
             user_id=user.id,
-            name=data["name"],
+            name=data.get("name"),
             phone=data["phone"],
             preferred_vendor_id=data.get("preferred_vendor_id"),
         )
@@ -343,6 +347,61 @@ def list_vendors():
     """List all vendors."""
     vendors = Vendor.query.all()
     return jsonify([vendor.to_dict() for vendor in vendors])
+
+
+@app.get("/api/vendors/nearby")
+def nearby_vendors():
+    """Find vendors near a latitude/longitude.
+
+    Query params: lat, lng, radius_km (default 5)
+    """
+    try:
+        lat = float(request.args.get("lat", ""))
+        lng = float(request.args.get("lng", ""))
+    except (ValueError, TypeError):
+        return jsonify({"error": "lat and lng query parameters are required (numbers)"}), 400
+
+    radius_km = float(request.args.get("radius_km", 5))
+
+    # Haversine formula in Python; small dataset so pull into memory
+    from math import radians, sin, cos, asin, sqrt
+
+    def haversine_km(lat1, lon1, lat2, lon2):
+        # convert decimal degrees to radians
+        lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+        c = 2 * asin(sqrt(a))
+        return 6371 * c
+
+    vendors = []
+    for v in Vendor.query.filter(Vendor.location_lat.isnot(None), Vendor.location_lng.isnot(None)).all():
+        dist = haversine_km(lat, lng, v.location_lat, v.location_lng)
+        if dist <= radius_km:
+            d = v.to_dict()
+            d["distance_km"] = round(dist, 3)
+            # compute open_now from opening_hours simple string
+            try:
+                if v.opening_hours and '-' in v.opening_hours:
+                    start_s, end_s = v.opening_hours.split('-', 1)
+                else:
+                    start_s, end_s = "09:00", "21:00"
+                now_t = datetime.utcnow().time()
+                from datetime import time as dtime
+
+                def parse_hm(s):
+                    h, m = map(int, s.split(':'))
+                    return dtime(h, m)
+                open_now = parse_hm(start_s) <= now_t <= parse_hm(end_s)
+            except Exception:
+                open_now = True
+            d["open_now"] = open_now and bool(v.available)
+            vendors.append(d)
+
+    # sort by distance
+    vendors.sort(key=lambda x: x.get("distance_km", 9999))
+    return jsonify(vendors)
 
 
 @app.get("/api/buyers")
@@ -575,6 +634,141 @@ def get_vendor_demand(vendor_id):
         vendor_id=vendor_id, requested_for_date=target_date
     ).all()
     return jsonify([r.to_dict() for r in requests_])
+
+
+# ---------- Vendor catalog (vendor-specific product listings) ----------
+
+
+@app.get("/api/vendors/<int:vendor_id>/catalog")
+def get_vendor_catalog(vendor_id):
+    vendor = Vendor.query.get_or_404(vendor_id)
+    # list vendor products
+    try:
+        from models import VendorProduct
+        items = VendorProduct.query.filter_by(vendor_id=vendor_id).all()
+        return jsonify([i.to_dict() for i in items])
+    except Exception:
+        return jsonify({"error": "vendor catalog not available"}), 500
+
+
+@app.post("/api/vendors/<int:vendor_id>/catalog")
+@require_auth
+@require_role("vendor")
+def upsert_vendor_product(vendor_id):
+    data = request.get_json(silent=True) or {}
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != vendor_id:
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
+    product_id = data.get("product_id")
+    price = data.get("price")
+    if not product_id or price is None:
+        return jsonify({"error": "product_id and price are required"}), 400
+    from models import VendorProduct
+    vp = VendorProduct.query.filter_by(
+        vendor_id=vendor_id, product_id=product_id).first()
+    if not vp:
+        vp = VendorProduct(vendor_id=vendor_id,
+                           product_id=product_id, price=price)
+        db.session.add(vp)
+    else:
+        vp.price = price
+    if "available" in data:
+        vp.available = bool(data.get("available"))
+    if "stock" in data:
+        vp.stock = data.get("stock")
+    db.session.commit()
+    return jsonify(vp.to_dict()), 201
+
+
+# ---------- Orders ----------
+
+
+@app.post("/api/orders")
+def create_order():
+    """Create a customer order for a vendor.
+    body: { buyer_id, vendor_id, mode: pickup|delivery, items: [{product_id, quantity}] }
+    """
+    data = request.get_json(silent=True) or {}
+    required = ["vendor_id", "items"]
+    if not all(k in data for k in required):
+        return jsonify({"error": f"required fields: {required}"}), 400
+    vendor_id = data["vendor_id"]
+    buyer_id = data.get("buyer_id")
+    mode = data.get("mode", "pickup")
+    items = data["items"]
+    if not isinstance(items, list) or len(items) == 0:
+        return jsonify({"error": "items must be a non-empty list"}), 400
+
+    from models import VendorProduct, Order, OrderItem
+
+    total = 0.0
+    order_items = []
+    for it in items:
+        pid = it.get("product_id")
+        qty = float(it.get("quantity", 0))
+        vp = VendorProduct.query.filter_by(
+            vendor_id=vendor_id, product_id=pid).first()
+        if not vp or not vp.available:
+            return jsonify({"error": "product_unavailable", "product_id": pid}), 400
+        unit_price = float(vp.price)
+        total += unit_price * qty
+        order_items.append(
+            {"product_id": pid, "quantity": qty, "unit_price": unit_price})
+
+    order = Order(vendor_id=vendor_id, buyer_id=buyer_id,
+                  total_amount=round(total, 2), mode=mode, status="pending")
+    db.session.add(order)
+    db.session.flush()
+
+    for oi in order_items:
+        oitem = OrderItem(
+            order_id=order.id, product_id=oi["product_id"], quantity=oi["quantity"], unit_price=oi["unit_price"])
+        db.session.add(oitem)
+
+    db.session.commit()
+    return jsonify(order.to_dict()), 201
+
+
+@app.get("/api/vendors/<int:vendor_id>/orders")
+@require_auth
+@require_role("vendor")
+def list_vendor_orders(vendor_id):
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != vendor_id:
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
+    from models import Order
+    orders = Order.query.filter_by(vendor_id=vendor_id).order_by(
+        Order.created_at.desc()).all()
+    return jsonify([o.to_dict() for o in orders])
+
+
+@app.patch("/api/orders/<int:order_id>/status")
+@require_auth
+def update_order_status(order_id):
+    data = request.get_json(silent=True) or {}
+    new_status = data.get("status")
+    if not new_status:
+        return jsonify({"error": "status is required"}), 400
+    order = Order.query.get_or_404(order_id)
+    # allow vendor to accept/fulfill, or buyer to cancel
+    user = g.current_user if hasattr(g, "current_user") else None
+    if user and user.role == "vendor":
+        if user.vendor_profile is None or user.vendor_profile.id != order.vendor_id:
+            return jsonify({"error": "forbidden"}), 403
+        order.status = new_status
+    elif user and user.role == "customer":
+        # buyers can cancel their own orders
+        if order.buyer_id is None:
+            return jsonify({"error": "buyer_not_set"}), 403
+        buyer = order.buyer
+        # buyer is a Buyer model, map to user via buyer.user_id
+        if buyer and buyer.user_id == user.id and new_status == "cancelled":
+            order.status = "cancelled"
+        else:
+            return jsonify({"error": "forbidden"}), 403
+    else:
+        return jsonify({"error": "authorization_required"}), 401
+
+    db.session.commit()
+    return jsonify(order.to_dict())
 
 
 @app.get("/api/vendors/<int:vendor_id>/procurement-list")

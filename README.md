@@ -39,7 +39,7 @@ python app.py            # http://127.0.0.1:5000, Swagger UI at /api/docs/
 ```bash
 cd frontend
 npm install
-npm run dev               # http://127.0.0.1:5173
+http://localhost:5173/              # http://127.0.0.1:5173
 ```
 
 ## Run it with Docker (Postgres instead of SQLite)

@@ -34,6 +34,7 @@ export const api = {
   me: () => request("/auth/me"),
 
   listVendors: () => request("/vendors"),
+  listNearbyVendors: (lat, lng, radius_km = 5) => request(`/vendors/nearby?lat=${lat}&lng=${lng}&radius_km=${radius_km}`),
   listBuyers: () => request("/buyers"),
   getProducts: () => request("/products"),
   getVendor: (vendorId) => request(`/vendors/${vendorId}`),
@@ -47,6 +48,14 @@ export const api = {
 
   submitDemand: (payload) =>
     request("/demand", { method: "POST", body: JSON.stringify(payload) }),
+  createOrder: (payload) =>
+    request("/orders", { method: "POST", body: JSON.stringify(payload) }),
+  getVendorCatalog: (vendorId) => request(`/vendors/${vendorId}/catalog`),
+  upsertVendorProduct: (vendorId, payload) =>
+    request(`/vendors/${vendorId}/catalog`, { method: "POST", body: JSON.stringify(payload) }),
+  getVendorOrders: (vendorId) => request(`/vendors/${vendorId}/orders`),
+  updateOrderStatus: (orderId, status) =>
+    request(`/orders/${orderId}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
   getVendorDemand: (vendorId, date) =>
     request(`/vendors/${vendorId}/demand?date=${date}`),
   getProcurementList: (vendorId, date) =>

@@ -21,33 +21,50 @@ def run():
         db.drop_all()
         db.create_all()
 
-        vendor = Vendor(
-            name="Murugan Vegetable Stall",
-            phone="9840000001",
-            location_lat=13.0827,
-            location_lng=80.2707,
-            cart_qr_code="CART-MURUGAN-01",
-        )
-        db.session.add(vendor)
-        db.session.flush()
+        # Create several demo vendors around central Chennai coordinates
+        demo_vendors = [
+            ("Murugan Vegetable Stall", "9840000001", 13.0827, 80.2707),
+            ("Kumar Fruits", "9840000010", 13.0800, 80.2700),
+            ("Sundar Juice", "9840000020", 13.0850, 80.2750),
+            ("Meena Flower Shop", "9840000030", 13.0900, 80.2680),
+        ]
 
-        user_vendor = User(
-            name="Murugan Vegetable Stall",
-            phone="9840000001",
-            password_hash=generate_password_hash("vendorpass"),
-            role="vendor",
-        )
-        db.session.add(user_vendor)
-        db.session.flush()
-        vendor.user_id = user_vendor.id
+        vendors = []
+        for i, (name, phone, lat, lng) in enumerate(demo_vendors, start=1):
+            v = Vendor(
+                name=name,
+                phone=phone,
+                location_lat=lat,
+                location_lng=lng,
+                cart_qr_code=f"CART-DEMO-{i:02d}",
+                available=True,
+                is_mobile=(i % 2 == 0),
+                opening_hours="08:00-20:00",
+                category="vegetable" if "Vegetable" in name or "Fruits" in name else "other",
+                rating=4.5 + (i % 3) * 0.2,
+            )
+            db.session.add(v)
+            db.session.flush()
 
+            user_vendor = User(
+                name=name,
+                phone=phone,
+                password_hash=generate_password_hash("vendorpass"),
+                role="vendor",
+            )
+            db.session.add(user_vendor)
+            db.session.flush()
+            v.user_id = user_vendor.id
+            vendors.append(v)
+
+        # assign buyers to first demo vendor
         buyers = [
             Buyer(name="Lakshmi", phone="9840000002",
-                  preferred_vendor_id=vendor.id),
+                  preferred_vendor_id=vendors[0].id),
             Buyer(name="Ravi", phone="9840000003",
-                  preferred_vendor_id=vendor.id),
+                  preferred_vendor_id=vendors[0].id),
             Buyer(name="Fathima", phone="9840000004",
-                  preferred_vendor_id=vendor.id),
+                  preferred_vendor_id=vendors[0].id),
         ]
         db.session.add_all(buyers)
         db.session.flush()
@@ -74,6 +91,7 @@ def run():
         ]
         db.session.add_all(user_buyers)
         db.session.flush()
+
         for buyer, user in zip(buyers, user_buyers):
             buyer.user_id = user.id
 
@@ -84,6 +102,20 @@ def run():
         ]
         db.session.add_all(products)
         db.session.commit()
+
+        # create vendor-specific catalog entries (VendorProduct)
+        try:
+            from models import VendorProduct
+            for v in vendors:
+                for p in products[:4]:
+                    vp = VendorProduct(vendor_id=v.id, product_id=p.id,
+                                       price=round(random.uniform(25, 80), 2),
+                                       available=True, stock=50)
+                    db.session.add(vp)
+            db.session.commit()
+        except Exception:
+            # VendorProduct may not be available in older schema
+            pass
 
         # 30 days of synthetic sales history per product, so the demand
         # predictor and profit/loss screens have something real to show.
@@ -101,7 +133,7 @@ def run():
                 price = round(cost * random.uniform(1.3, 1.6), 2)
 
                 entry = DailyStock(
-                    vendor_id=vendor.id,
+                    vendor_id=vendors[0].id,
                     product_id=product.id,
                     stock_date=d,
                     purchased_qty=purchased,
@@ -112,7 +144,7 @@ def run():
                 db.session.add(entry)
 
         db.session.commit()
-        print("Seeded 1 vendor, 3 buyers, 6 products, 30 days of stock history.")
+        print("Seeded demo vendors, buyers, products, and stock history.")
 
 
 if __name__ == "__main__":
