@@ -17,14 +17,10 @@ export default function App() {
   useEffect(() => {
     async function loadPeople() {
       try {
-        const [vendorList, buyerList] = await Promise.all([
-          api.listVendors(),
-          api.listBuyers(),
-        ]);
+        const vendorList = await api.listVendors();
         setVendors(vendorList);
-        setBuyers(buyerList);
       } catch (error) {
-        console.error("Failed to load vendor/buyer lists", error);
+        console.error("Failed to load vendor list", error);
       }
     }
     loadPeople();
@@ -84,18 +80,7 @@ export default function App() {
           <ProfilePage user={auth.user} profile={auth.profile} onLogout={handleLogout} />
           {mode === null ? (
             <RoleSelector
-              vendors={vendors}
-              buyers={buyers}
-              onChooseVendor={(vendor) => {
-                setSelectedVendor(vendor);
-                setSelectedBuyer(null);
-                setMode("vendor");
-              }}
-              onChooseBuyer={(buyer) => {
-                setSelectedBuyer(buyer);
-                setSelectedVendor(vendors.find((v) => v.id === buyer.preferred_vendor_id) || null);
-                setMode("buyer");
-              }}
+              user={auth.user}
             />
           ) : mode === "vendor" ? (
             <VendorDashboard

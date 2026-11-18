@@ -4,7 +4,7 @@ A working MVP scaffold covering:
 - Vendor daily purchase/sale entry → auto profit/loss
 - **The demand loop**: buyers submit "tomorrow's list" → app aggregates it →
   blended with an AI walk-in-demand prediction → vendor's procurement list
-- Fuzzy product matching (FAISS) so buyers can type free-form text instead
+- Fuzzy product matching (difflib) so buyers can type free-form text instead
   of picking from an exact dropdown
 - Swagger/OpenAPI docs for the whole API
 - Dockerized (Postgres + Flask + React), with a pytest suite
@@ -16,7 +16,7 @@ backend/
   app.py                 routes + Swagger UI at /api/docs/
   models.py               DB schema (SQLite locally, Postgres in Docker)
   demand_prediction.py     weighted-average demand forecast
-  product_matcher.py       FAISS + TF-IDF fuzzy product matching
+  product_matcher.py       character n-gram and common-spelling fuzzy matching
   seed.py                  sample vendor, buyers, products, 30 days of history
   tests/                   pytest suite (11 tests, run with `pytest`)
   Dockerfile
@@ -85,7 +85,7 @@ multilingual embedding model.
 | Docker | `backend/Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml` | Built, YAML-validated (Docker itself needs to run on your machine to fully verify) |
 | PostgreSQL | `docker-compose.yml` db service + `DATABASE_URL` env var | Built — swap is a connection string, no code changes |
 | Pytest | `backend/tests/` | Built, 11 tests passing |
-| Vector DB (FAISS) | `backend/product_matcher.py` | Built, tested, live-verified |
+| Fuzzy matching | `backend/product_matcher.py` | Built, tested, live-verified |
 | LangGraph | Not yet built — see below | Next step |
 | PyTorch | Not yet built — see below | Next step |
 | Databricks | Not yet built — see below | Next step |
@@ -139,4 +139,3 @@ fuzzy product matching, Swagger docs, pytest suite, Docker/Postgres config.
 **Stubbed for you to build next:** auth, real voice input (Whisper/Google
 STT), WhatsApp bot channel, UPI payment, push notifications, LangGraph
 agent, PyTorch model, Databricks pipeline, AWS deployment.
-

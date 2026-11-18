@@ -1,5 +1,6 @@
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
@@ -8,12 +9,16 @@ from functools import wraps
 from werkzeug.security import check_password_hash, generate_password_hash
 import jwt
 
-from models import db, User, Vendor, Buyer, Product, DailyStock, DemandRequest, Transaction
+from models import (
+    db, User, Vendor, Buyer, Product, DailyStock, DemandRequest,
+    Transaction, Order, OrderItem, VendorProduct,
+)
 from demand_prediction import build_procurement_list
 from product_matcher import ProductMatcher
 
 app = Flask(__name__)
-CORS(app)
+allowed_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
+CORS(app, resources={r"/api/*": {"origins": [v.strip() for v in allowed_origins]}})
 
 app.config["SWAGGER"] = {
     "title": "Veggie Vendor Assistant API",
@@ -28,10 +33,9 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
     "DATABASE_URL", "sqlite:///veggie_app.db"
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["JWT_SECRET_KEY"] = os.environ.get(
-    "JWT_SECRET_KEY", "please-change-this-secret")
+app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY")
 
-if "JWT_SECRET_KEY" not in app.config or not app.config["JWT_SECRET_KEY"]:
+if not app.config["JWT_SECRET_KEY"] and not os.environ.get("FLASK_ENV") == "development":
     raise RuntimeError("JWT_SECRET_KEY must be configured")
 
 db.init_app(app)
@@ -141,6 +145,26 @@ def parse_date(value: str | None) -> date:
         raise ValueError("date must be in YYYY-MM-DD format") from exc
 
 
+def parse_non_negative_number(value, field_name: str):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must be a number")
+    if number < 0:
+        raise ValueError(f"{field_name} must be zero or greater")
+    return number
+
+
+def parse_positive_number(value, field_name: str):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must be a number")
+    if number <= 0:
+        raise ValueError(f"{field_name} must be greater than zero")
+    return number
+
+
 def get_bearer_token() -> str | None:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
@@ -166,7 +190,7 @@ def require_auth(func):
         if not payload or "sub" not in payload:
             return jsonify({"error": "invalid_token"}), 401
 
-        user = User.query.get(payload["sub"])
+        user = db.session.get(User, payload["sub"])
         if not user:
             return jsonify({"error": "user_not_found"}), 401
 
@@ -180,14 +204,10 @@ def require_role(role):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            auth_response = require_auth(lambda *a, **k: None)(*args, **kwargs)
-            if isinstance(auth_response, tuple):
-                return auth_response
-
-            user = g.current_user
-            if user.role != role:
+            if not hasattr(g, "current_user"):
+                return jsonify({"error": "authorization_required"}), 401
+            if g.current_user.role != role:
                 return jsonify({"error": "forbidden", "message": f"{role} role required"}), 403
-
             return func(*args, **kwargs)
 
         return wrapper
@@ -199,7 +219,7 @@ def make_token(user: User) -> str:
     payload = {
         "sub": user.id,
         "role": user.role,
-        "exp": datetime.utcnow() + timedelta(days=7),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
     }
     return jwt.encode(payload, app.config["JWT_SECRET_KEY"], algorithm="HS256")
 
@@ -346,7 +366,19 @@ def get_vendor(vendor_id):
 def list_vendors():
     """List all vendors."""
     vendors = Vendor.query.all()
-    return jsonify([vendor.to_dict() for vendor in vendors])
+    return jsonify([
+        {
+            "id": vendor.id,
+            "name": vendor.name,
+            "location_lat": vendor.location_lat,
+            "location_lng": vendor.location_lng,
+            "opening_hours": vendor.opening_hours,
+            "rating": vendor.rating,
+            "available": bool(vendor.available),
+            "is_mobile": bool(vendor.is_mobile),
+        }
+        for vendor in vendors
+    ])
 
 
 @app.get("/api/vendors/nearby")
@@ -387,7 +419,11 @@ def nearby_vendors():
                     start_s, end_s = v.opening_hours.split('-', 1)
                 else:
                     start_s, end_s = "09:00", "21:00"
-                now_t = datetime.utcnow().time()
+                try:
+                    local_zone = ZoneInfo(getattr(v, "timezone", None) or "Asia/Kolkata")
+                except ZoneInfoNotFoundError:
+                    local_zone = ZoneInfo("Asia/Kolkata")
+                now_t = datetime.now(local_zone).time().replace(tzinfo=None)
                 from datetime import time as dtime
 
                 def parse_hm(s):
@@ -405,6 +441,8 @@ def nearby_vendors():
 
 
 @app.get("/api/buyers")
+@require_auth
+@require_role("vendor")
 def list_buyers():
     """List all buyers."""
     buyers = Buyer.query.all()
@@ -456,13 +494,24 @@ def add_stock_entry():
         stock_date = parse_date(data.get("stock_date"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != int(data["vendor_id"]):
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
+    if not db.session.get(Product, data["product_id"]):
+        return jsonify({"error": "product_not_found", "message": "Product does not exist"}), 400
+
+    numeric_fields = ("purchased_qty", "unit_cost", "sold_qty", "unit_price")
+    try:
+        for field in numeric_fields:
+            if field in data:
+                data[field] = parse_non_negative_number(data[field], field)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     entry = DailyStock.query.filter_by(
         vendor_id=data["vendor_id"],
         product_id=data["product_id"],
         stock_date=stock_date,
     ).first()
-
     if not entry:
         entry = DailyStock(
             vendor_id=data["vendor_id"],
@@ -470,9 +519,6 @@ def add_stock_entry():
             stock_date=stock_date,
         )
         db.session.add(entry)
-
-    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != data["vendor_id"]:
-        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
 
     if "purchased_qty" in data:
         entry.purchased_qty = data["purchased_qty"]
@@ -488,6 +534,8 @@ def add_stock_entry():
 
 
 @app.get("/api/vendors/<int:vendor_id>/stock")
+@require_auth
+@require_role("vendor")
 def get_stock(vendor_id):
     """Get a vendor's stock entries for a given date.
     ---
@@ -507,7 +555,12 @@ def get_stock(vendor_id):
       200:
         description: List of stock entries
     """
-    stock_date = parse_date(request.args.get("date"))
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != vendor_id:
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
+    try:
+        stock_date = parse_date(request.args.get("date"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     entries = DailyStock.query.filter_by(
         vendor_id=vendor_id, stock_date=stock_date
     ).all()
@@ -515,6 +568,8 @@ def get_stock(vendor_id):
 
 
 @app.get("/api/vendors/<int:vendor_id>/summary")
+@require_auth
+@require_role("vendor")
 def profit_loss_summary(vendor_id):
     """Daily profit/loss rollup — the core 'how did today go' screen.
     ---
@@ -534,7 +589,12 @@ def profit_loss_summary(vendor_id):
       200:
         description: Profit/loss summary with line items
     """
-    stock_date = parse_date(request.args.get("date"))
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != vendor_id:
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
+    try:
+        stock_date = parse_date(request.args.get("date"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     entries = DailyStock.query.filter_by(
         vendor_id=vendor_id, stock_date=stock_date
     ).all()
@@ -583,18 +643,30 @@ def submit_demand_request():
       400:
         description: Missing required fields
     """
-    data = request.get_json()
-    required = ["buyer_id", "vendor_id", "product_id",
-                "quantity", "requested_for_date"]
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body is required"}), 400
+    required = ["vendor_id", "product_id", "quantity", "requested_for_date"]
     if not all(k in data for k in required):
         return jsonify({"error": f"required fields: {required}"}), 400
+    if g.current_user.buyer_profile is None:
+        return jsonify({"error": "forbidden", "message": "customer profile required"}), 403
+    try:
+        quantity = parse_positive_number(data["quantity"], "quantity")
+        requested_for_date = parse_date(data["requested_for_date"])
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not db.session.get(Vendor, data["vendor_id"]):
+        return jsonify({"error": "vendor_not_found"}), 400
+    if not db.session.get(Product, data["product_id"]):
+        return jsonify({"error": "product_not_found"}), 400
 
     req_entry = DemandRequest(
-        buyer_id=data["buyer_id"],
+        buyer_id=g.current_user.buyer_profile.id,
         vendor_id=data["vendor_id"],
         product_id=data["product_id"],
-        quantity=data["quantity"],
-        requested_for_date=parse_date(data["requested_for_date"]),
+        quantity=quantity,
+        requested_for_date=requested_for_date,
         status="pending",
     )
     db.session.add(req_entry)
@@ -683,6 +755,8 @@ def upsert_vendor_product(vendor_id):
 
 
 @app.post("/api/orders")
+@require_auth
+@require_role("customer")
 def create_order():
     """Create a customer order for a vendor.
     body: { buyer_id, vendor_id, mode: pickup|delivery, items: [{product_id, quantity}] }
@@ -692,8 +766,14 @@ def create_order():
     if not all(k in data for k in required):
         return jsonify({"error": f"required fields: {required}"}), 400
     vendor_id = data["vendor_id"]
-    buyer_id = data.get("buyer_id")
+    if g.current_user.buyer_profile is None:
+        return jsonify({"error": "forbidden", "message": "customer profile required"}), 403
+    buyer_id = g.current_user.buyer_profile.id
     mode = data.get("mode", "pickup")
+    if mode not in {"pickup", "delivery"}:
+        return jsonify({"error": "invalid_mode", "message": "mode must be pickup or delivery"}), 400
+    if not db.session.get(Vendor, vendor_id):
+        return jsonify({"error": "vendor_not_found"}), 400
     items = data["items"]
     if not isinstance(items, list) or len(items) == 0:
         return jsonify({"error": "items must be a non-empty list"}), 400
@@ -704,7 +784,10 @@ def create_order():
     order_items = []
     for it in items:
         pid = it.get("product_id")
-        qty = float(it.get("quantity", 0))
+        try:
+            qty = parse_positive_number(it.get("quantity"), "quantity")
+        except (AttributeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
         vp = VendorProduct.query.filter_by(
             vendor_id=vendor_id, product_id=pid).first()
         if not vp or not vp.available:
@@ -747,12 +830,25 @@ def update_order_status(order_id):
     new_status = data.get("status")
     if not new_status:
         return jsonify({"error": "status is required"}), 400
-    order = Order.query.get_or_404(order_id)
+    allowed_statuses = {"pending", "accepted", "fulfilled", "cancelled"}
+    if new_status not in allowed_statuses:
+        return jsonify({"error": "invalid_status", "message": "status is not allowed"}), 400
+    order = db.session.get(Order, order_id)
+    if order is None:
+        return jsonify({"error": "order_not_found"}), 404
     # allow vendor to accept/fulfill, or buyer to cancel
     user = g.current_user if hasattr(g, "current_user") else None
     if user and user.role == "vendor":
         if user.vendor_profile is None or user.vendor_profile.id != order.vendor_id:
             return jsonify({"error": "forbidden"}), 403
+        if order.status == "cancelled":
+            return jsonify({"error": "invalid_transition"}), 400
+        if order.status == "pending" and new_status not in {"accepted", "cancelled"}:
+            return jsonify({"error": "invalid_transition"}), 400
+        if order.status == "accepted" and new_status not in {"fulfilled", "cancelled"}:
+            return jsonify({"error": "invalid_transition"}), 400
+        if order.status == "fulfilled":
+            return jsonify({"error": "invalid_transition"}), 400
         order.status = new_status
     elif user and user.role == "customer":
         # buyers can cancel their own orders
@@ -850,6 +946,8 @@ def confirm_demand_request(request_id):
 # ---------- Transactions ----------
 
 @app.post("/api/transactions")
+@require_auth
+@require_role("vendor")
 def record_transaction():
     """Record a payment transaction (UPI or cash).
     ---
@@ -877,11 +975,19 @@ def record_transaction():
 
     if "vendor_id" not in data or "amount" not in data:
         return jsonify({"error": "vendor_id and amount are required"}), 400
+    if g.current_user.vendor_profile is None or g.current_user.vendor_profile.id != int(data["vendor_id"]):
+        return jsonify({"error": "forbidden", "message": "vendor access only for your own profile"}), 403
+    try:
+        amount = parse_positive_number(data["amount"], "amount")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if data.get("mode", "upi") not in {"upi", "cash"}:
+        return jsonify({"error": "invalid_mode"}), 400
 
     txn = Transaction(
         vendor_id=data["vendor_id"],
         buyer_id=data.get("buyer_id"),
-        amount=data["amount"],
+        amount=amount,
         mode=data.get("mode", "upi"),
     )
     db.session.add(txn)

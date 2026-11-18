@@ -47,7 +47,8 @@ def test_add_stock_entry_and_summary(client, seeded):
     assert body["profit"] == 10
 
     summary = client.get(
-        f"/api/vendors/{seeded['vendor_id']}/summary?date={today}"
+        f"/api/vendors/{seeded['vendor_id']}/summary?date={today}",
+        headers=headers,
     ).get_json()
     assert summary["total_profit"] == 10
     assert len(summary["items"]) == 1
@@ -159,7 +160,8 @@ def test_list_vendors_and_buyers(client, seeded):
     assert isinstance(vendors, list)
     assert any(v["id"] == seeded["vendor_id"] for v in vendors)
 
-    resp = client.get("/api/buyers")
+    vendor_headers = login(client, "9000000000", "vendorpass")
+    resp = client.get("/api/buyers", headers=vendor_headers)
     assert resp.status_code == 200
     buyers = resp.get_json()
     assert isinstance(buyers, list)

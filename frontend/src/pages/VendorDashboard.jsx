@@ -51,18 +51,17 @@ export default function VendorDashboard({ vendorId, vendorName, onBack, user, pr
   useEffect(() => {
     if (!vendorId) return;
     loadAll();
-    const intervalId = setInterval(loadAll, 5000);
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === "visible") loadAll();
+    }, 60000);
     const handler = (e) => setActiveTab(e.detail || "overview");
     window.addEventListener("dashboard:navigate", handler);
-    return () => clearInterval(intervalId);
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener("dashboard:navigate", handler);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendorId]);
-
-  useEffect(() => {
-    const handler = (e) => setActiveTab(e.detail || "overview");
-    window.addEventListener("dashboard:navigate", handler);
-    return () => window.removeEventListener("dashboard:navigate", handler);
-  }, []);
 
   async function handleSubmitStock(e) {
     e.preventDefault();

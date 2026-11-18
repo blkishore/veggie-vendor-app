@@ -53,6 +53,7 @@ class Vendor(db.Model):
     rating = db.Column(db.Float, default=5.0)
     profile_photo = db.Column(db.String(200))
     trust_score = db.Column(db.Float, default=5.0)
+    timezone = db.Column(db.String(64), default="Asia/Kolkata")
     created_at = db.Column(
         db.DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -281,6 +282,7 @@ class Order(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     items = db.relationship("OrderItem", backref="order", lazy=True)
+    buyer = db.relationship("Buyer")
 
     def to_dict(self):
         return {

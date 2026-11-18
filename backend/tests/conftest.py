@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
+
 import pytest
 from datetime import date, timedelta
 from werkzeug.security import generate_password_hash
