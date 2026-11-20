@@ -1,37 +1,27 @@
-export default function ProfilePage({ user, profile, onLogout }) {
-  return (
-    <div>
-      <div className="section-header">
-        <div>
-          <h2>Welcome back, {user.name}</h2>
-          <p className="helper-text">Role: {user.role} {profile?.name ? `• ${profile.name}` : ''}</p>
-        </div>
-        <button className="ghost" onClick={onLogout}>Log out</button>
-      </div>
+export default function ProfilePage({ user, profile }) {
+  const profileName = profile?.name || user.name;
 
-      <div className="card">
-        <h3>Your profile</h3>
-        <div className="field-row">
-          <div className="field">
-            <label>Name</label>
-            <div>{user.name}</div>
-          </div>
-          <div className="field">
-            <label>Phone</label>
-            <div>{user.phone}</div>
-          </div>
+  return (
+    <section className="card" aria-labelledby="profile-heading">
+      <div className="section-title-row">
+        <div>
+          <p className="eyebrow">Account</p>
+          <h2 id="profile-heading" className="profile-heading">{profileName}</h2>
         </div>
-        <div className="field-row">
-          <div className="field">
-            <label>Role</label>
-            <div>{user.role}</div>
-          </div>
-          <div className="field">
-            <label>ID</label>
-            <div>{profile?.id}</div>
-          </div>
+        <span className="status-pill confirmed">
+          {user.role === "vendor" ? "Vendor account" : "Customer account"}
+        </span>
+      </div>
+      <div className="profile-grid">
+        <div>
+          <div className="field-label">Account name</div>
+          <div className="profile-value">{user.name}</div>
+        </div>
+        <div>
+          <div className="field-label">Phone number</div>
+          <div className="profile-value">{user.phone}</div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

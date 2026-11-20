@@ -1,7 +1,9 @@
 import os
+import secrets
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from dotenv import load_dotenv
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from flasgger import Swagger
@@ -15,6 +17,8 @@ from models import (
 )
 from demand_prediction import build_procurement_list
 from product_matcher import ProductMatcher
+
+load_dotenv()
 
 app = Flask(__name__)
 allowed_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
@@ -35,8 +39,17 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY")
 
-if not app.config["JWT_SECRET_KEY"] and not os.environ.get("FLASK_ENV") == "development":
-    raise RuntimeError("JWT_SECRET_KEY must be configured")
+if not app.config["JWT_SECRET_KEY"]:
+    if os.environ.get("FLASK_ENV") == "development" or __name__ == "__main__":
+        app.config["JWT_SECRET_KEY"] = secrets.token_urlsafe(32)
+        app.logger.warning(
+            "JWT_SECRET_KEY is not set; using a temporary key for local development. "
+            "Set a persistent secret to keep sessions across restarts."
+        )
+    else:
+        raise RuntimeError(
+            "JWT_SECRET_KEY must be configured in the environment or a .env file"
+        )
 
 db.init_app(app)
 
@@ -1053,4 +1066,4 @@ if __name__ == "__main__":
     with app.app_context():
         db.create_all()
         seed_demo_data()
-    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)

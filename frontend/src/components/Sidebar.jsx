@@ -1,24 +1,38 @@
-export default function Sidebar() {
+const items = [
+  ["overview", "Overview"],
+  ["orders", "Orders"],
+  ["products", "Products"],
+  ["gallery", "Gallery"],
+  ["settings", "Settings"],
+];
+
+export default function Sidebar({ activeTab, onNavigate }) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="logo">🥕</div>
+        <div className="logo" aria-hidden="true">🥬</div>
         <div>
           <div className="brand-title">Veggie Vendor</div>
-          <div className="brand-sub">Dashboard</div>
+          <div className="brand-sub">Business workspace</div>
         </div>
       </div>
 
-      <nav className="nav">
-        <button className="nav-item" onClick={() => window.dispatchEvent(new CustomEvent('dashboard:navigate', { detail: 'overview' }))}>Overview</button>
-        <button className="nav-item" onClick={() => window.dispatchEvent(new CustomEvent('dashboard:navigate', { detail: 'orders' }))}>Orders</button>
-        <button className="nav-item" onClick={() => window.dispatchEvent(new CustomEvent('dashboard:navigate', { detail: 'products' }))}>Products</button>
-        <button className="nav-item" onClick={() => window.dispatchEvent(new CustomEvent('dashboard:navigate', { detail: 'gallery' }))}>Gallery</button>
-        <button className="nav-item" onClick={() => window.dispatchEvent(new CustomEvent('dashboard:navigate', { detail: 'settings' }))}>Settings</button>
+      <nav className="nav" aria-label="Vendor dashboard">
+        {items.map(([id, label]) => (
+          <button
+            key={id}
+            className={`nav-item${activeTab === id ? " active" : ""}`}
+            type="button"
+            aria-current={activeTab === id ? "page" : undefined}
+            onClick={() => onNavigate(id)}
+          >
+            {label}
+          </button>
+        ))}
       </nav>
 
       <div className="sidebar-footer">
-        <small className="small-note">v1.0 • Local</small>
+        <small className="small-note">Your local market, organized.</small>
       </div>
     </aside>
   );

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { api, todayISO } from "../api.js";
+import { api, formatINR, todayISO } from "../api.js";
 import DashboardLayout from "../components/DashboardLayout.jsx";
 import ImageGallery from "../components/ImageGallery.jsx";
 import VendorOverview from "./VendorOverview.jsx";
@@ -9,217 +9,272 @@ import VendorProducts from "./VendorProducts.jsx";
 import VendorGalleryPage from "./VendorGalleryPage.jsx";
 import VendorSettings from "./VendorSettings.jsx";
 
+const emptyForm = {
+  product_id: "",
+  purchased_qty: "",
+  unit_cost: "",
+  sold_qty: "",
+  unit_price: "",
+};
+
 export default function VendorDashboard({ vendorId, vendorName, onBack, user, profile }) {
   const outlet = useOutletContext() || {};
   const auth = outlet.auth || { user, profile };
   const [products, setProducts] = useState([]);
   const [summary, setSummary] = useState(null);
   const [procurement, setProcurement] = useState([]);
-  const [rawDemand, setRawDemand] = useState([]);
-  const [form, setForm] = useState({
-    product_id: "",
-    purchased_qty: "",
-    unit_cost: "",
-    sold_qty: "",
-    unit_price: "",
-  });
+  const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [savingStock, setSavingStock] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
 
   const today = todayISO();
   const tomorrow = todayISO(1);
 
-  async function loadAll() {
+  const loadAll = useCallback(async () => {
     try {
-      const [prods, summaryData, procurementData, demandData] = await Promise.all([
+      const [productList, summaryData, procurementData] = await Promise.all([
         api.getProducts(),
         api.getSummary(vendorId, today),
         api.getProcurementList(vendorId, tomorrow),
-        api.getVendorDemand(vendorId, tomorrow),
       ]);
-      setProducts(prods);
+      setProducts(productList);
       setSummary(summaryData);
-      setProcurement(procurementData.procurement_list);
-      setRawDemand(demandData);
-      setLastUpdated(new Date().toLocaleTimeString());
-    } catch (e) {
-      setError(e.message);
+      setProcurement(procurementData.procurement_list || []);
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+      setError(null);
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setLoading(false);
     }
-  }
+  }, [vendorId, today, tomorrow]);
 
   useEffect(() => {
-    if (!vendorId) return;
+    if (!vendorId) {
+      setLoading(false);
+      return undefined;
+    }
     loadAll();
     const intervalId = setInterval(() => {
       if (document.visibilityState === "visible") loadAll();
     }, 60000);
-    const handler = (e) => setActiveTab(e.detail || "overview");
-    window.addEventListener("dashboard:navigate", handler);
-    return () => {
-      clearInterval(intervalId);
-      window.removeEventListener("dashboard:navigate", handler);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vendorId]);
+    return () => clearInterval(intervalId);
+  }, [vendorId, loadAll]);
 
-  async function handleSubmitStock(e) {
-    e.preventDefault();
+  async function handleSubmitStock(event) {
+    event.preventDefault();
     setError(null);
+    setNotice(null);
+    if (!form.purchased_qty && !form.sold_qty) {
+      setError("Enter a purchased quantity or a sold quantity before saving.");
+      return;
+    }
+    setSavingStock(true);
     try {
       await api.addStockEntry({
         vendor_id: vendorId,
         product_id: Number(form.product_id),
         stock_date: today,
-        ...(form.purchased_qty && { purchased_qty: Number(form.purchased_qty) }),
-        ...(form.unit_cost && { unit_cost: Number(form.unit_cost) }),
-        ...(form.sold_qty && { sold_qty: Number(form.sold_qty) }),
-        ...(form.unit_price && { unit_price: Number(form.unit_price) }),
+        ...(form.purchased_qty !== "" && { purchased_qty: Number(form.purchased_qty) }),
+        ...(form.unit_cost !== "" && { unit_cost: Number(form.unit_cost) }),
+        ...(form.sold_qty !== "" && { sold_qty: Number(form.sold_qty) }),
+        ...(form.unit_price !== "" && { unit_price: Number(form.unit_price) }),
       });
-      setForm({ product_id: "", purchased_qty: "", unit_cost: "", sold_qty: "", unit_price: "" });
-      loadAll();
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  async function handleConfirmRequest(requestId) {
-    try {
-      await api.confirmDemand(requestId, true);
-      loadAll();
-    } catch (e) {
-      setError(e.message);
+      setForm(emptyForm);
+      setNotice("Today's stock entry has been saved.");
+      await loadAll();
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSavingStock(false);
     }
   }
 
   return (
-    <DashboardLayout title={vendorName || "Vendor Dashboard"} user={auth?.user} profile={auth?.profile}>
+    <DashboardLayout
+      title={vendorName || "Vendor dashboard"}
+      user={auth?.user}
+      profile={auth?.profile}
+      activeTab={activeTab}
+      onNavigate={(tab) => {
+        setActiveTab(tab);
+        setError(null);
+        setNotice(null);
+      }}
+    >
       <div className="section-header">
         <div>
-          <h3 className="muted-title">Vendor mode — live sales, orders, and procurement.</h3>
+          <h3 className="muted-title">A clear view of today's sales and tomorrow's plan.</h3>
         </div>
-        <button className="ghost" onClick={onBack}>Back</button>
+        {onBack && <button className="ghost" type="button" onClick={onBack}>Back to workspace</button>}
       </div>
 
-      {error && <div className="card error-box">{error}</div>}
+      {error && <div className="status-message error" role="alert">{error}</div>}
+      {notice && <div className="status-message success" role="status">{notice}</div>}
 
       <div className="grid-2">
-        <div className="card">
+        <section className="card" aria-labelledby="daily-summary-heading">
           <div className="section-title-row">
-            <h3>Today's summary</h3>
-            <span className="small-note">Updated {lastUpdated || "now"}</span>
+            <h3 id="daily-summary-heading">Today's performance</h3>
+            <span className="small-note">
+              {lastUpdated ? `Updated ${lastUpdated}` : "Today's summary"}
+            </span>
           </div>
-        {summary ? (
-          <div className="summary-strip">
-            <div className="stat-tag">
-              <span className="label">Cost</span>₹{summary.total_cost}
+          {loading && !summary ? (
+            <div className="loading-state" role="status">
+              <span className="loading-spinner" aria-hidden="true" />
+              Loading your business summary…
             </div>
-            <div className="stat-tag">
-              <span className="label">Revenue</span>₹{summary.total_revenue}
+          ) : summary ? (
+            <div className="summary-strip">
+              <div className="stat-tag">
+                <span className="label">Cost</span>{formatINR(summary.total_cost)}
+              </div>
+              <div className="stat-tag">
+                <span className="label">Revenue</span>{formatINR(summary.total_revenue)}
+              </div>
+              <div className="stat-tag profit">
+                <span className="label">Profit</span>{formatINR(summary.total_profit)}
+              </div>
             </div>
-            <div className="stat-tag profit">
-              <span className="label">Profit</span>₹{summary.total_profit}
-            </div>
-          </div>
-        ) : (
-          <p className="empty-state">Loading summary…</p>
-        )}
-        </div>
+          ) : (
+            <p className="empty-state">Your sales summary will appear here once the service is connected.</p>
+          )}
+        </section>
 
-        <div className="card">
-          <h3>Gallery</h3>
-          <p className="small-note">Add images to showcase produce or art.</p>
-          <ImageGallery vendorId={vendorId} />
-        </div>
+        <section className="card" aria-labelledby="gallery-preview-heading">
+          <h3 id="gallery-preview-heading">Image previews</h3>
+          <p className="small-note">Preview a product photo before sharing it elsewhere.</p>
+          <ImageGallery />
+        </section>
       </div>
-      {/* Tab content area */}
-      <div className="card">
+
+      <section className="card">
         {activeTab === "overview" && <VendorOverview summary={summary} lastUpdated={lastUpdated} />}
         {activeTab === "orders" && <VendorOrders vendorId={vendorId} />}
         {activeTab === "products" && <VendorProducts vendorId={vendorId} />}
-        {activeTab === "gallery" && <VendorGalleryPage vendorId={vendorId} />}
+        {activeTab === "gallery" && <VendorGalleryPage />}
         {activeTab === "settings" && <VendorSettings vendorId={vendorId} profile={profile} />}
-      </div>
+      </section>
 
-      <div className="card">
-        <h3>Quick entry</h3>
-        <p className="helper-text">Log a purchase or sale in one tap. Leave purchase fields blank if you only update sold quantity.</p>
-        <form onSubmit={handleSubmitStock}>
+      <section className="card" aria-labelledby="stock-entry-heading">
+        <div className="section-title-row">
+          <div>
+            <h3 id="stock-entry-heading">Record today's stock</h3>
+            <p className="helper-text">Add a purchase, a sale, or both. Quantities use the product's listed unit.</p>
+          </div>
+        </div>
+        <form onSubmit={handleSubmitStock} aria-busy={savingStock}>
           <div className="field-row">
             <div className="field">
-              <label>Product</label>
+              <label htmlFor="stock-product">Product</label>
               <select
+                id="stock-product"
                 value={form.product_id}
-                onChange={(e) => setForm({ ...form, product_id: e.target.value })}
+                onChange={(event) => setForm({ ...form, product_id: event.target.value })}
                 required
               >
-                <option value="" disabled>Select…</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>
+                <option value="" disabled>Select a product</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>{product.name} ({product.unit})</option>
                 ))}
               </select>
             </div>
             <div className="field">
-              <label>Purchased qty</label>
+              <label htmlFor="stock-purchased">Purchased quantity</label>
               <input
+                id="stock-purchased"
                 type="number"
+                min="0"
                 step="0.1"
+                inputMode="decimal"
                 value={form.purchased_qty}
-                onChange={(e) => setForm({ ...form, purchased_qty: e.target.value })}
+                onChange={(event) => setForm({ ...form, purchased_qty: event.target.value })}
+                placeholder="e.g. 10"
               />
             </div>
             <div className="field">
-              <label>Cost / unit</label>
+              <label htmlFor="stock-cost">Cost per unit (₹)</label>
               <input
+                id="stock-cost"
                 type="number"
-                step="0.1"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
                 value={form.unit_cost}
-                onChange={(e) => setForm({ ...form, unit_cost: e.target.value })}
+                onChange={(event) => setForm({ ...form, unit_cost: event.target.value })}
+                placeholder="e.g. 24.00"
               />
             </div>
           </div>
           <div className="field-row">
             <div className="field">
-              <label>Sold qty</label>
+              <label htmlFor="stock-sold">Sold quantity</label>
               <input
+                id="stock-sold"
                 type="number"
+                min="0"
                 step="0.1"
+                inputMode="decimal"
                 value={form.sold_qty}
-                onChange={(e) => setForm({ ...form, sold_qty: e.target.value })}
+                onChange={(event) => setForm({ ...form, sold_qty: event.target.value })}
+                placeholder="e.g. 7"
               />
             </div>
             <div className="field">
-              <label>Sale price</label>
+              <label htmlFor="stock-price">Selling price per unit (₹)</label>
               <input
+                id="stock-price"
                 type="number"
-                step="0.1"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
                 value={form.unit_price}
-                onChange={(e) => setForm({ ...form, unit_price: e.target.value })}
+                onChange={(event) => setForm({ ...form, unit_price: event.target.value })}
+                placeholder="e.g. 32.00"
               />
             </div>
           </div>
-          <button className="primary" type="submit">Save entry</button>
+          <button className="primary" type="submit" disabled={savingStock || loading || products.length === 0}>
+            {savingStock ? "Saving entry…" : "Save stock entry"}
+          </button>
         </form>
-      </div>
+      </section>
 
-      <div className="card">
-        <h3>Tomorrow's procurement list</h3>
-        {procurement.length === 0 ? (
-          <p className="empty-state">No prediction available yet.</p>
+      <section className="card" aria-labelledby="procurement-heading">
+        <div className="section-title-row">
+          <div>
+            <h3 id="procurement-heading">Suggested purchases for tomorrow</h3>
+            <p className="helper-text">A guide based on customer pre-orders and estimated walk-in demand.</p>
+          </div>
+        </div>
+        {loading && procurement.length === 0 ? (
+          <div className="loading-state" role="status">
+            <span className="loading-spinner" aria-hidden="true" />
+            Preparing your list…
+          </div>
+        ) : procurement.length === 0 ? (
+          <p className="empty-state">No purchase suggestions yet. Add today's sales to help build a forecast.</p>
         ) : (
           <div className="order-list">
             {procurement.map((row) => (
               <div key={row.product} className="order-card small">
                 <div>
                   <div className="order-title">{row.product}</div>
-                  <div className="order-meta">Pre-order {row.pre_ordered_qty} • Walk-in {row.predicted_walkin_qty}</div>
+                  <div className="order-meta">
+                    Pre-orders {row.pre_ordered_qty} · Estimated walk-ins {row.predicted_walkin_qty}
+                  </div>
                 </div>
-                <div className="qty-tag">Buy {row.recommended_purchase_qty} {row.unit}</div>
+                <div className="qty-tag">Plan for {row.recommended_purchase_qty} {row.unit}</div>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </section>
     </DashboardLayout>
   );
 }

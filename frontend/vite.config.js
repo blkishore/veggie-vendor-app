@@ -10,9 +10,9 @@ export default defineConfig({
       manifest: {
         name: "Veggie Vendor App",
         short_name: "VeggieApp",
-        description: "Simple vendor and customer ordering for local vegetable carts.",
-        theme_color: "#16281f",
-        background_color: "#f2f3ea",
+        description: "Manage local produce sales, customer orders, and tomorrow's purchasing plan.",
+        theme_color: "#173c2c",
+        background_color: "#f5f7f3",
         display: "standalone",
         icons: [
           {
@@ -24,6 +24,20 @@ export default defineConfig({
             src: "/pwa-512.svg",
             sizes: "512x512",
             type: "image/svg+xml",
+          },
+        ],
+        shortcuts: [
+          {
+            name: "Vendor dashboard",
+            short_name: "Vendor",
+            url: "/vendor",
+            description: "Open the vendor dashboard",
+          },
+          {
+            name: "Customer ordering",
+            short_name: "Customer",
+            url: "/customer",
+            description: "Start a customer order",
           },
         ],
       },

@@ -1,54 +1,75 @@
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
+import AppHeader from "../components/AppHeader.jsx";
 import AuthPage from "./AuthPage.jsx";
 import { api } from "../api.js";
 
 export default function VendorApp() {
   const [auth, setAuth] = useState(null);
-  const [checking, setChecking] = useState(true);
+  const [checking, setChecking] = useState(api.hasAuthToken());
+  const [sessionError, setSessionError] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.me()
-      .then((payload) => setAuth(payload))
-      .catch(() => setAuth(null))
-      .finally(() => setChecking(false));
+    let active = true;
+    async function restoreSession() {
+      if (!api.hasAuthToken()) {
+        setChecking(false);
+        return;
+      }
+      try {
+        const payload = await api.me();
+        if (active) setAuth(payload);
+      } catch (error) {
+        if (!active) return;
+        if (error.status === 401) api.setAuthToken(null);
+        else setSessionError(error.message);
+      } finally {
+        if (active) setChecking(false);
+      }
+    }
+    restoreSession();
+    return () => {
+      active = false;
+    };
   }, []);
 
   function handleLogin(payload) {
     setAuth(payload);
-    if (payload?.user?.role === "vendor") {
-      navigate("/vendor/main");
-    } else {
-      // keep showing login so user can sign in with a vendor account
-    }
+    setSessionError(null);
+    if (payload?.user?.role === "vendor") navigate("/vendor/main");
   }
 
   function handleLogout() {
     api.setAuthToken(null);
     setAuth(null);
+    setSessionError(null);
     navigate("/");
   }
 
-  if (checking) return <div className="app-shell"><p className="empty-state">Checking session…</p></div>;
+  const canAccess = auth?.user?.role === "vendor";
 
-  if (!auth || !auth.user || auth.user.role !== "vendor") {
-    return (
-      <div className="app-shell">
-        {auth?.user && (
-          <div className="card error-box">
-            <h3>Please sign in as a vendor</h3>
-            <p className="helper-text">Signed in as <strong>{auth.user.role}</strong>. To continue as a vendor, sign in with a vendor account.</p>
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <button className="ghost" onClick={handleLogout}>Log out</button>
-              <button className="primary" onClick={() => navigate('/')}>Go home</button>
+  return (
+    <div className="app-shell">
+      <AppHeader user={auth?.user} onLogout={handleLogout} />
+      {checking ? (
+        <div className="loading-state" role="status">
+          <span className="loading-spinner" aria-hidden="true" />
+          Checking your account…
+        </div>
+      ) : canAccess ? (
+        <Outlet context={{ auth }} />
+      ) : (
+        <main>
+          {sessionError && <div className="status-message error" role="alert">{sessionError}</div>}
+          {auth?.user && (
+            <div className="status-message error" role="alert">
+              This area is for vendor accounts. You are signed in as a {auth.user.role}.
             </div>
-          </div>
-        )}
-        <AuthPage onLogin={handleLogin} />
-      </div>
-    );
-  }
-
-  return <Outlet context={{ auth }} />;
+          )}
+          <AuthPage onLogin={handleLogin} />
+        </main>
+      )}
+    </div>
+  );
 }

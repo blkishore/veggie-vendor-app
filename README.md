@@ -1,6 +1,6 @@
-# Smart Vegetable Vendor Assistant — starter codebase
+# Veggie Vendor
 
-A working MVP scaffold covering:
+A vendor and customer application for local produce businesses. It includes:
 - Vendor daily purchase/sale entry → auto profit/loss
 - **The demand loop**: buyers submit "tomorrow's list" → app aggregates it →
   blended with an AI walk-in-demand prediction → vendor's procurement list
@@ -18,7 +18,7 @@ backend/
   demand_prediction.py     weighted-average demand forecast
   product_matcher.py       character n-gram and common-spelling fuzzy matching
   seed.py                  sample vendor, buyers, products, 30 days of history
-  tests/                   pytest suite (11 tests, run with `pytest`)
+  tests/                   pytest suite (run with `pytest`)
   Dockerfile
 frontend/    React (Vite) app
   src/pages/VendorDashboard.jsx
@@ -27,20 +27,44 @@ frontend/    React (Vite) app
 docker-compose.yml         wires Postgres + backend + frontend together
 ```
 
-## Run it locally (no Docker)
+## Run locally (no Docker)
 
-```bash
+Start the backend in one PowerShell terminal:
+```powershell
 cd backend
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python seed.py
-python app.py            # http://127.0.0.1:5000, Swagger UI at /api/docs/
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python app.py
 ```
-```bash
+
+Direct local runs generate a temporary JWT key automatically, so no additional
+configuration is required to try the app. Sessions expire when the backend
+restarts. To keep sessions across restarts, create a root `.env` from
+`.env.example`, replace its `JWT_SECRET_KEY` placeholder with a private local
+secret, and save it. The backend loads this file automatically; `.env` is
+ignored by Git and should never be committed.
+
+The backend is available at `http://127.0.0.1:5000`; API documentation is at
+`http://127.0.0.1:5000/api/docs/`. On an empty database, the app creates a
+small demo catalog automatically. For the larger sample dataset, see the
+seed warning below.
+
+Start the frontend in a second terminal:
+```powershell
 cd frontend
-npm install
-http://localhost:5173/              # http://127.0.0.1:5173
+npm ci
+npm run dev
 ```
+Open `http://localhost:5173/`. Vite proxies `/api` requests to the local
+backend at `127.0.0.1:5000`.
+
+The built-in demo account credentials are intended for local development
+only: vendor `9840000001` / `vendorpass`; customer `9840000002` / `buyerpass`.
+
+> **Warning:** `python seed.py` drops and recreates all database tables before
+> inserting sample vendors, buyers, and sales. Run it only against a disposable
+> local database. Do not run it against data you need to keep.
 
 ## Run it with Docker (Postgres instead of SQLite)
 
@@ -48,9 +72,9 @@ http://localhost:5173/              # http://127.0.0.1:5173
 docker compose up --build
 ```
 This starts Postgres, runs the backend against it (`DATABASE_URL` is set in
-`docker-compose.yml`), and serves the built frontend. Note: you'll need to
-run `python seed.py` once inside the backend container (or add it as an
-entrypoint step) since the compose file doesn't auto-seed.
+`docker-compose.yml`), and serves the built frontend. To populate the database
+with the larger sample dataset on a fresh setup, run the seed command once.
+It is destructive if the database already contains data.
 
 ```bash
 docker compose exec backend python seed.py
@@ -84,7 +108,7 @@ multilingual embedding model.
 |---|---|---|
 | Docker | `backend/Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml` | Built, YAML-validated (Docker itself needs to run on your machine to fully verify) |
 | PostgreSQL | `docker-compose.yml` db service + `DATABASE_URL` env var | Built — swap is a connection string, no code changes |
-| Pytest | `backend/tests/` | Built, 11 tests passing |
+| Pytest | `backend/tests/` | Built, 12 tests passing |
 | Fuzzy matching | `backend/product_matcher.py` | Built, tested, live-verified |
 | LangGraph | Not yet built — see below | Next step |
 | PyTorch | Not yet built — see below | Next step |
@@ -133,9 +157,12 @@ Replace `demand_prediction.py`'s heuristic with a small regression model:
 
 ## What's stubbed vs. real
 
-**Real and working:** profit/loss, demand loop, AI procurement blending,
-fuzzy product matching, Swagger docs, pytest suite, Docker/Postgres config.
+**Working:** account registration and sign-in, vendor and customer workspaces,
+vendor product listings, pickup orders, profit/loss, the demand loop,
+procurement suggestions, fuzzy product matching, Swagger docs, pytest suite,
+and Docker/Postgres config.
 
-**Stubbed for you to build next:** auth, real voice input (Whisper/Google
-STT), WhatsApp bot channel, UPI payment, push notifications, LangGraph
-agent, PyTorch model, Databricks pipeline, AWS deployment.
+**Not implemented yet:** persistent photo uploads, vendor availability
+controls, voice input (Whisper/Google STT), WhatsApp integration, UPI payments,
+push notifications, LangGraph agent, PyTorch forecasting model, Databricks
+pipeline, and AWS deployment.

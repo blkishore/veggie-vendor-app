@@ -1,106 +1,78 @@
 import { useEffect, useState } from "react";
-import RoleSelector from "./pages/RoleSelector.jsx";
-import VendorDashboard from "./pages/VendorDashboard.jsx";
-import BuyerList from "./pages/BuyerList.jsx";
 import AuthPage from "./pages/AuthPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
+import RoleSelector from "./pages/RoleSelector.jsx";
+import AppHeader from "./components/AppHeader.jsx";
 import { api } from "./api.js";
 
 export default function App() {
   const [auth, setAuth] = useState(null);
-  const [mode, setMode] = useState(null);
-  const [vendors, setVendors] = useState([]);
-  const [buyers, setBuyers] = useState([]);
-  const [selectedVendor, setSelectedVendor] = useState(null);
-  const [selectedBuyer, setSelectedBuyer] = useState(null);
+  const [checkingSession, setCheckingSession] = useState(api.hasAuthToken());
+  const [sessionError, setSessionError] = useState(null);
 
   useEffect(() => {
-    async function loadPeople() {
-      try {
-        const vendorList = await api.listVendors();
-        setVendors(vendorList);
-      } catch (error) {
-        console.error("Failed to load vendor list", error);
-      }
-    }
-    loadPeople();
-  }, []);
-
-  useEffect(() => {
+    let active = true;
     async function restoreSession() {
+      if (!api.hasAuthToken()) {
+        setCheckingSession(false);
+        return;
+      }
+
       try {
         const payload = await api.me();
-        setAuth(payload);
-      } catch (_err) {
-        api.setAuthToken(null);
-        setAuth(null);
+        if (active) setAuth(payload);
+      } catch (error) {
+        if (!active) return;
+        if (error.status === 401) {
+          api.setAuthToken(null);
+        } else {
+          setSessionError(error.message);
+        }
+      } finally {
+        if (active) setCheckingSession(false);
       }
     }
+
     restoreSession();
+    return () => {
+      active = false;
+    };
   }, []);
-
-  const buyerPreferredVendor = selectedBuyer
-    ? vendors.find((v) => v.id === selectedBuyer.preferred_vendor_id)
-    : null;
-
-  const activeVendor =
-    mode === "vendor"
-      ? selectedVendor
-      : buyerPreferredVendor || selectedVendor;
-
-  const activeVendorId = activeVendor?.id;
-  const activeVendorName = activeVendor?.name;
 
   function handleLogout() {
     api.setAuthToken(null);
     setAuth(null);
-    setMode(null);
-    setSelectedVendor(null);
-    setSelectedBuyer(null);
+    setSessionError(null);
   }
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <h1>Veggie Vendor App</h1>
-          <p className="app-subtitle">Simple vendor + customer ordering for local carts</p>
+      <AppHeader user={auth?.user} onLogout={handleLogout} />
+      {checkingSession ? (
+        <div className="loading-state" role="status">
+          <span className="loading-spinner" aria-hidden="true" />
+          Restoring your session…
         </div>
-        {auth && (
-          <button className="ghost" onClick={handleLogout}>
-            Log out
-          </button>
-        )}
-      </header>
-
-      {!auth ? (
-        <AuthPage onLogin={(payload) => setAuth(payload)} />
-      ) : auth?.user ? (
-        <>
-          <ProfilePage user={auth.user} profile={auth.profile} onLogout={handleLogout} />
-          {mode === null ? (
-            <RoleSelector
-              user={auth.user}
-            />
-          ) : mode === "vendor" ? (
-            <VendorDashboard
-              vendorId={activeVendorId}
-              vendorName={activeVendorName || selectedVendor?.name || "Vendor"}
-              user={auth.user}
-              profile={auth.profile}
-              onBack={() => setMode(null)}
-            />
-          ) : (
-            <BuyerList
-              vendorId={activeVendorId}
-              buyerId={selectedBuyer?.id}
-              buyerName={selectedBuyer?.name}
-              vendorName={activeVendorName || selectedVendor?.name}
-              onBack={() => setMode(null)}
-            />
+      ) : !auth ? (
+        <main>
+          {sessionError && (
+            <div className="status-message error" role="alert">
+              <span>{sessionError} You can still sign in once the service is available.</span>
+            </div>
           )}
-        </>
-      ) : null}
+          <AuthPage
+            onLogin={(payload) => {
+              setSessionError(null);
+              setAuth(payload);
+            }}
+          />
+        </main>
+      ) : (
+        <main>
+          <ProfilePage user={auth.user} profile={auth.profile} />
+          <RoleSelector user={auth.user} />
+        </main>
+      )}
     </div>
   );
 }

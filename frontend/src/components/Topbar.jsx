@@ -1,14 +1,19 @@
 export default function Topbar({ title, user, profile }) {
-  const initials = user?.name?.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase() || "VV";
+  const initials = user?.name
+    ?.trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "VV";
   return (
     <header className="topbar">
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div>
         <h2 className="topbar-title">{title}</h2>
-        {profile?.name && <div className="small-note">{profile.name}</div>}
+        <div className="small-note">{profile?.name || user?.name || "Your business workspace"}</div>
       </div>
       <div className="topbar-actions">
-        <input className="search" placeholder="Search products, orders…" />
-        <div className="avatar">{initials}</div>
+        <div className="avatar" aria-label={`Signed in as ${user?.name || "user"}`}>{initials}</div>
       </div>
     </header>
   );

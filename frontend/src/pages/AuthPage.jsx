@@ -3,66 +3,95 @@ import { api } from "../api.js";
 
 export default function AuthPage({ onLogin }) {
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", phone: "", password: "", role: "vendor" });
+  const [form, setForm] = useState({
+    name: "",
+    store_name: "",
+    phone: "",
+    password: "",
+    role: "vendor",
+  });
   const [error, setError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function submit(event) {
     event.preventDefault();
+    if (submitting) return;
     setError(null);
+    setSubmitting(true);
 
     try {
       const body = {
-        name: form.name,
-        owner_name: form.owner_name,
-        store_name: form.store_name,
-        phone: form.phone,
+        name: form.name.trim(),
+        owner_name: form.name.trim(),
+        store_name: form.store_name.trim() || form.name.trim(),
+        phone: form.phone.trim(),
         password: form.password,
         role: form.role,
-        preferred_vendor_id: form.preferred_vendor_id || null,
-        location_lat: form.location_lat || null,
-        location_lng: form.location_lng || null,
-        cart_qr_code: form.cart_qr_code || null,
       };
 
       const payload = mode === "login"
-        ? await api.login({ phone: form.phone, password: form.password })
+        ? await api.login({ phone: form.phone.trim(), password: form.password })
         : await api.register(body);
 
       api.setAuthToken(payload.token);
       onLogin(payload);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "We couldn't sign you in. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
+  function changeMode(nextMode) {
+    setError(null);
+    setMode(nextMode);
+  }
+
+  const isRegistering = mode === "register";
+
   return (
-    <div>
-      <div className="card">
-        <div className="section-title-row">
-          <div>
-            <h2>{mode === "login" ? "Sign in" : "Create account"}</h2>
-            <p className="helper-text">
-              {mode === "login"
-                ? "Use your vendor or customer credentials to continue."
-                : "Register as a vendor or customer with separate credentials."
-              }
-            </p>
-          </div>
-          <button className="ghost" onClick={() => setMode(mode === "login" ? "register" : "login")}> 
-            {mode === "login" ? "New account" : "Already have one?"}
-          </button>
+    <div className="auth-layout">
+      <section className="auth-aside" aria-labelledby="welcome-heading">
+        <p className="eyebrow">A fresher way to work</p>
+        <h2 id="welcome-heading">Your neighborhood market, made simpler.</h2>
+        <p>
+          Keep your daily business moving with clear orders, easy sales tracking,
+          and produce lists that help you plan ahead.
+        </p>
+        <ul className="feature-list">
+          <li><span className="feature-check" aria-hidden="true">✓</span> Keep customer orders in one place</li>
+          <li><span className="feature-check" aria-hidden="true">✓</span> Track sales and daily performance</li>
+          <li><span className="feature-check" aria-hidden="true">✓</span> Plan tomorrow's produce with confidence</li>
+        </ul>
+      </section>
+
+      <section className="auth-card" aria-labelledby="auth-heading">
+        <div className="auth-heading">
+          <h2 id="auth-heading">{isRegistering ? "Create your account" : "Welcome back"}</h2>
+          <p>
+            {isRegistering
+              ? "A few details and you're ready to get started."
+              : "Sign in to pick up where you left off."}
+          </p>
         </div>
 
-        {error && <div className="card error-box">{error}</div>}
+        {error && (
+          <div className="status-message error" role="alert">
+            <span>{error}</span>
+          </div>
+        )}
 
-        <form onSubmit={submit}>
-          {mode === "register" && (
+        <form onSubmit={submit} aria-busy={submitting}>
+          {isRegistering && (
             <div className="field-row">
               <div className="field">
-                <label>Full name</label>
+                <label htmlFor="account-name">Your name</label>
                 <input
+                  id="account-name"
+                  autoComplete="name"
                   value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                  placeholder="e.g. Meena Kumar"
                   required
                 />
               </div>
@@ -71,68 +100,87 @@ export default function AuthPage({ onLogin }) {
 
           <div className="field-row">
             <div className="field">
-              <label>Phone</label>
+              <label htmlFor="account-phone">Phone number</label>
               <input
+                id="account-phone"
                 type="tel"
+                inputMode="tel"
+                autoComplete="tel"
                 value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                placeholder="e.g. 9840000001"
-                required
-              />
-            </div>
-            <div className="field">
-              <label>Password</label>
-              <input
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                onChange={(event) => setForm({ ...form, phone: event.target.value })}
+                placeholder="e.g. 98400 00000"
                 required
               />
             </div>
           </div>
-          {mode === "register" && (
+
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="account-password">Password</label>
+              <input
+                id="account-password"
+                type="password"
+                autoComplete={isRegistering ? "new-password" : "current-password"}
+                value={form.password}
+                onChange={(event) => setForm({ ...form, password: event.target.value })}
+                required
+              />
+            </div>
+          </div>
+
+          {isRegistering && (
             <>
               <div className="field-row">
-                <label style={{ width: "100%" }}>
-                  Role
+                <div className="field">
+                  <label htmlFor="account-role">I am joining as a</label>
                   <select
+                    id="account-role"
                     value={form.role}
-                    onChange={(e) => setForm({ ...form, role: e.target.value })}
-                    style={{ width: "100%", marginTop: "6px" }}
+                    onChange={(event) => setForm({ ...form, role: event.target.value })}
                   >
                     <option value="vendor">Vendor</option>
                     <option value="customer">Customer</option>
                   </select>
-                </label>
-              </div>
-
-              {form.role === "vendor" ? (
-                <div className="field-row">
-                  <div className="field">
-                    <label>Owner name</label>
-                    <input value={form.owner_name || ""} onChange={(e) => setForm({ ...form, owner_name: e.target.value })} placeholder="Owner's name" />
-                  </div>
-                  <div className="field">
-                    <label>Store name</label>
-                    <input value={form.store_name || ""} onChange={(e) => setForm({ ...form, store_name: e.target.value })} placeholder="Store / stall name" />
-                  </div>
                 </div>
-              ) : (
+              </div>
+              {form.role === "vendor" && (
                 <div className="field-row">
                   <div className="field">
-                    <label>Preferred vendor (optional)</label>
-                    <input value={form.preferred_vendor_id || ""} onChange={(e) => setForm({ ...form, preferred_vendor_id: e.target.value })} placeholder="Vendor ID or leave empty" />
+                    <label htmlFor="store-name">Business or stall name <span className="small-note">(optional)</span></label>
+                    <input
+                      id="store-name"
+                      autoComplete="organization"
+                      value={form.store_name}
+                      onChange={(event) => setForm({ ...form, store_name: event.target.value })}
+                      placeholder="e.g. Meena's Fresh Market"
+                    />
                   </div>
                 </div>
               )}
             </>
           )}
 
-          <button className="primary" type="submit">
-            {mode === "login" ? "Sign in" : "Register"}
+          <button className="primary" type="submit" disabled={submitting}>
+            {submitting
+              ? "Please wait…"
+              : isRegistering
+                ? "Create account"
+                : "Sign in"}
           </button>
         </form>
-      </div>
+
+        <div className="auth-switch">
+          <span>{isRegistering ? "Already have an account?" : "New to Veggie Vendor?"}</span>
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => changeMode(isRegistering ? "login" : "register")}
+            disabled={submitting}
+          >
+            {isRegistering ? "Sign in" : "Create account"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

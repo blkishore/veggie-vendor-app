@@ -1,92 +1,157 @@
-import { useEffect, useState } from "react";
-import { api } from "../api.js";
+import { useCallback, useEffect, useState } from "react";
+import { api, formatINR } from "../api.js";
+
+const initialForm = { product_id: "", price: "", stock: "" };
 
 export default function VendorProducts({ vendorId }) {
   const [catalog, setCatalog] = useState([]);
+  const [products, setProducts] = useState([]);
   const [error, setError] = useState(null);
-  const [form, setForm] = useState({ product_id: "", price: "", available: true, stock: "" });
+  const [notice, setNotice] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(initialForm);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
-      const list = await api.getVendorCatalog(vendorId);
-      setCatalog(list || []);
-    } catch (e) {
-      setError(e.message);
+      const [catalogItems, productList] = await Promise.all([
+        api.getVendorCatalog(vendorId),
+        api.getProducts(),
+      ]);
+      setCatalog(catalogItems);
+      setProducts(productList);
+      setError(null);
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    if (!vendorId) return;
-    load();
   }, [vendorId]);
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  useEffect(() => {
+    if (vendorId) load();
+  }, [vendorId, load]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
     setError(null);
+    setNotice(null);
+    setSaving(true);
     try {
       await api.upsertVendorProduct(vendorId, {
         product_id: Number(form.product_id),
         price: Number(form.price),
-        available: !!form.available,
-        stock: form.stock ? Number(form.stock) : undefined,
+        available: true,
+        ...(form.stock !== "" && { stock: Number(form.stock) }),
       });
-      setForm({ product_id: "", price: "", available: true, stock: "" });
-      load();
-    } catch (err) {
-      setError(err.message);
+      setForm(initialForm);
+      setNotice("Your product listing has been saved.");
+      await load();
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
     <div>
       <div className="section-header">
-        <h3>Products</h3>
-        <span className="small-note">Manage your catalog</span>
+        <div>
+          <h3>Product catalog</h3>
+          <span className="small-note">Set the price and availability customers see.</span>
+        </div>
       </div>
-      {error && <div className="card error-box">{error}</div>}
+      {error && <div className="status-message error" role="alert">{error}</div>}
+      {notice && <div className="status-message success" role="status">{notice}</div>}
 
-      <div className="card">
-        <h4>Add / Update product</h4>
-        <form onSubmit={handleSubmit} className="field-row">
-          <div className="field">
-            <label>Product ID</label>
-            <input value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>Price</label>
-            <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>Stock</label>
-            <input value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>&nbsp;</label>
-            <button className="primary" type="submit">Save</button>
-          </div>
-        </form>
-      </div>
+      <section className="card">
+        <h4>Add or update a listing</h4>
+        {products.length === 0 && !loading ? (
+          <p className="empty-state">The product catalog is unavailable. Try again when the service is connected.</p>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div className="field-row">
+              <div className="field">
+                <label htmlFor="catalog-product">Product</label>
+                <select
+                  id="catalog-product"
+                  value={form.product_id}
+                  onChange={(event) => setForm({ ...form, product_id: event.target.value })}
+                  required
+                >
+                  <option value="" disabled>Select a product</option>
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>{product.name} ({product.unit})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="catalog-price">Price per unit (₹)</label>
+                <input
+                  id="catalog-price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={form.price}
+                  onChange={(event) => setForm({ ...form, price: event.target.value })}
+                  placeholder="e.g. 32.00"
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="catalog-stock">Available stock</label>
+                <input
+                  id="catalog-stock"
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  inputMode="decimal"
+                  value={form.stock}
+                  onChange={(event) => setForm({ ...form, stock: event.target.value })}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            <button className="primary" type="submit" disabled={saving || loading}>
+              {saving ? "Saving listing…" : "Save listing"}
+            </button>
+          </form>
+        )}
+      </section>
 
-      <div className="card">
-        <h4>Catalog</h4>
-        {catalog.length === 0 ? (
-          <p className="empty-state">No products in your catalog yet.</p>
+      <section>
+        <div className="section-title-row">
+          <h4>Your listings</h4>
+          <span className="small-note">{catalog.length} {catalog.length === 1 ? "product" : "products"}</span>
+        </div>
+        {loading ? (
+          <div className="loading-state" role="status">
+            <span className="loading-spinner" aria-hidden="true" />
+            Loading your catalog…
+          </div>
+        ) : catalog.length === 0 ? (
+          <p className="empty-state">Your catalog is empty. Add a listing above to get started.</p>
         ) : (
           <div className="product-grid">
-            {catalog.map((c) => (
-              <div key={c.id} className="product-card">
+            {catalog.map((item) => (
+              <article key={item.id} className="product-card">
                 <div>
-                  <div className="product-name">{c.product_name}</div>
-                  <div className="helper-text">₹{c.price} · {c.available ? 'Available' : 'Unavailable'}</div>
+                  <div className="product-name">{item.product_name}</div>
+                  <div className="order-meta">{formatINR(item.price)} per unit</div>
                 </div>
                 <div className="quantity-controls">
-                  <div>{c.stock}</div>
+                  <span className="small-note">Stock: {item.stock ?? 0}</span>
+                  <span className={`status-pill${item.available ? " confirmed" : " cancelled"}`}>
+                    {item.available ? "Available" : "Unavailable"}
+                  </span>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }
